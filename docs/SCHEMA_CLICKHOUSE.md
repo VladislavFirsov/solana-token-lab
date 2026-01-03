@@ -217,11 +217,13 @@ GROUP BY candidate_id, timestamp_ms;
 |-------|------|-------------|
 | 1 | `001_timeseries.sql` | Price, liquidity, volume tables |
 | 2 | `002_derived_features.sql` | Derived features table |
+| 3 | `003_feature_views.sql` | Views for computing derived features |
 
 Run migrations:
 ```bash
 clickhouse-client --query "$(cat sql/clickhouse/001_timeseries.sql)"
 clickhouse-client --query "$(cat sql/clickhouse/002_derived_features.sql)"
+clickhouse-client --query "$(cat sql/clickhouse/003_feature_views.sql)"
 ```
 
 ---
