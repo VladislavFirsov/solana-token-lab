@@ -1,0 +1,14 @@
+# Local workflow artifacts
+workflow/
+
+# OS
+.DS_Store
+
+# Go build
+/bin/
+*.exe
+*.out
+*.test
+
+# Logs
+*.log
