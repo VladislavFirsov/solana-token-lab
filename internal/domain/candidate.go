@@ -8,6 +8,7 @@ type TokenCandidate struct {
 	Mint         string  // token mint address
 	Pool         *string // pool address (nullable)
 	TxSignature  string  // discovery transaction signature
+	EventIndex   int     // index of discovery event within transaction
 	Slot         int64   // Solana slot number
 	DiscoveredAt int64   // Unix timestamp in milliseconds
 	CreatedAt    int64   // record creation timestamp (ms)

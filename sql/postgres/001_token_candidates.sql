@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS token_candidates (
     mint                TEXT NOT NULL,              -- token mint address
     pool                TEXT,                       -- pool address (nullable for pre-pool)
     tx_signature        TEXT NOT NULL,              -- discovery transaction signature
+    event_index         INTEGER NOT NULL,           -- index of discovery event within transaction
     slot                BIGINT NOT NULL,            -- Solana slot number
     discovered_at       BIGINT NOT NULL,            -- Unix timestamp (ms)
     created_at          BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000),
@@ -45,5 +46,6 @@ COMMENT ON COLUMN token_candidates.source IS 'Discovery source: NEW_TOKEN or ACT
 COMMENT ON COLUMN token_candidates.mint IS 'Solana token mint address';
 COMMENT ON COLUMN token_candidates.pool IS 'Pool address (may be NULL if discovered before pool creation)';
 COMMENT ON COLUMN token_candidates.tx_signature IS 'Transaction signature of discovery event';
+COMMENT ON COLUMN token_candidates.event_index IS 'Index of discovery event within transaction';
 COMMENT ON COLUMN token_candidates.slot IS 'Solana slot number of discovery';
 COMMENT ON COLUMN token_candidates.discovered_at IS 'Unix timestamp in milliseconds';
