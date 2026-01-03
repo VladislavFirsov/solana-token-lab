@@ -149,3 +149,22 @@ type StrategyAggregateStore interface {
 	// GetAll retrieves all aggregates.
 	GetAll(ctx context.Context) ([]*domain.StrategyAggregate, error)
 }
+
+// SwapEventStore provides access to discovery swap events storage.
+// Used for ACTIVE_TOKEN detection before tokens become candidates.
+type SwapEventStore interface {
+	// Insert adds a new swap event. Returns ErrDuplicateKey if (mint, tx_signature, event_index) exists.
+	Insert(ctx context.Context, e *domain.SwapEvent) error
+
+	// InsertBulk adds multiple swap events atomically. Fails entire batch on any duplicate.
+	InsertBulk(ctx context.Context, events []*domain.SwapEvent) error
+
+	// GetByTimeRange retrieves swap events within [start, end) (inclusive start, exclusive end).
+	GetByTimeRange(ctx context.Context, start, end int64) ([]*domain.SwapEvent, error)
+
+	// GetByMintTimeRange retrieves swap events for a mint within [start, end).
+	GetByMintTimeRange(ctx context.Context, mint string, start, end int64) ([]*domain.SwapEvent, error)
+
+	// GetDistinctMintsByTimeRange returns all distinct mints with swap events in [start, end).
+	GetDistinctMintsByTimeRange(ctx context.Context, start, end int64) ([]string, error)
+}

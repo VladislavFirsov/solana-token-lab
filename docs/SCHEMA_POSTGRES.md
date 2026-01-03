@@ -124,6 +124,30 @@ Token metadata from on-chain.
 
 ---
 
+### swap_events
+
+Discovery swap events for ACTIVE_TOKEN detection. Contains raw swap data before tokens become candidates.
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| mint | TEXT | NO | Token mint address |
+| pool | TEXT | YES | Pool address (nullable) |
+| tx_signature | TEXT | NO | Transaction signature |
+| event_index | INTEGER | NO | Index of swap within transaction |
+| slot | BIGINT | NO | Solana slot number |
+| timestamp | BIGINT | NO | Unix timestamp in milliseconds |
+| amount_out | NUMERIC | NO | Output amount for volume calculations |
+
+**Constraints:**
+- PRIMARY KEY on `(mint, tx_signature, event_index)`
+
+**Indexes:**
+- `idx_swap_events_timestamp` — query by time range
+- `idx_swap_events_mint_timestamp` — mint + time queries
+- `idx_swap_events_slot` — query by slot range
+
+---
+
 ## Append-Only Policy
 
 All tables enforce append-only semantics:
@@ -191,6 +215,7 @@ Replay guarantees:
 | 2 | `002_swaps.sql` | Swap transactions |
 | 3 | `003_liquidity_events.sql` | Liquidity events |
 | 4 | `004_token_metadata.sql` | Token metadata |
+| 6 | `006_swap_events.sql` | Discovery swap events |
 
 Run migrations in order:
 ```bash
@@ -198,6 +223,7 @@ psql -d solana_token_lab -f sql/postgres/001_token_candidates.sql
 psql -d solana_token_lab -f sql/postgres/002_swaps.sql
 psql -d solana_token_lab -f sql/postgres/003_liquidity_events.sql
 psql -d solana_token_lab -f sql/postgres/004_token_metadata.sql
+psql -d solana_token_lab -f sql/postgres/006_swap_events.sql
 ```
 
 ---
