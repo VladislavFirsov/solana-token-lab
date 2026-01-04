@@ -27,12 +27,24 @@ var _ storage.LiquidityEventStore = (*LiquidityEventStore)(nil)
 func (s *LiquidityEventStore) Insert(ctx context.Context, e *domain.LiquidityEvent) error {
 	query := `
 		INSERT INTO liquidity_events (
-			candidate_id, tx_signature, event_index, slot, timestamp, event_type, amount_token, amount_quote, liquidity_after
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			candidate_id, tx_signature, event_index, slot, timestamp, event_type, amount_token, amount_quote, liquidity_after, pool, mint
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`
 
+	// Convert empty strings to nil for nullable columns
+	var candidateID, pool, mint interface{}
+	if e.CandidateID != "" {
+		candidateID = e.CandidateID
+	}
+	if e.Pool != "" {
+		pool = e.Pool
+	}
+	if e.Mint != "" {
+		mint = e.Mint
+	}
+
 	_, err := s.pool.Exec(ctx, query,
-		e.CandidateID,
+		candidateID,
 		e.TxSignature,
 		e.EventIndex,
 		e.Slot,
@@ -41,6 +53,8 @@ func (s *LiquidityEventStore) Insert(ctx context.Context, e *domain.LiquidityEve
 		e.AmountToken,
 		e.AmountQuote,
 		e.LiquidityAfter,
+		pool,
+		mint,
 	)
 	if err != nil {
 		if isDuplicateKeyError(err) {
@@ -65,13 +79,25 @@ func (s *LiquidityEventStore) InsertBulk(ctx context.Context, events []*domain.L
 
 	query := `
 		INSERT INTO liquidity_events (
-			candidate_id, tx_signature, event_index, slot, timestamp, event_type, amount_token, amount_quote, liquidity_after
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			candidate_id, tx_signature, event_index, slot, timestamp, event_type, amount_token, amount_quote, liquidity_after, pool, mint
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`
 
 	for _, e := range events {
+		// Convert empty strings to nil for nullable columns
+		var candidateID, pool, mint interface{}
+		if e.CandidateID != "" {
+			candidateID = e.CandidateID
+		}
+		if e.Pool != "" {
+			pool = e.Pool
+		}
+		if e.Mint != "" {
+			mint = e.Mint
+		}
+
 		_, err := tx.Exec(ctx, query,
-			e.CandidateID,
+			candidateID,
 			e.TxSignature,
 			e.EventIndex,
 			e.Slot,
@@ -80,6 +106,8 @@ func (s *LiquidityEventStore) InsertBulk(ctx context.Context, events []*domain.L
 			e.AmountToken,
 			e.AmountQuote,
 			e.LiquidityAfter,
+			pool,
+			mint,
 		)
 		if err != nil {
 			if isDuplicateKeyError(err) {
@@ -99,7 +127,7 @@ func (s *LiquidityEventStore) InsertBulk(ctx context.Context, events []*domain.L
 // GetByCandidateID retrieves all events for a candidate, ordered by timestamp ASC.
 func (s *LiquidityEventStore) GetByCandidateID(ctx context.Context, candidateID string) ([]*domain.LiquidityEvent, error) {
 	query := `
-		SELECT id, candidate_id, tx_signature, event_index, slot, timestamp, event_type, amount_token, amount_quote, liquidity_after, created_at
+		SELECT id, candidate_id, tx_signature, event_index, slot, timestamp, event_type, amount_token, amount_quote, liquidity_after, created_at, pool, mint
 		FROM liquidity_events
 		WHERE candidate_id = $1
 		ORDER BY timestamp ASC, id ASC
@@ -117,7 +145,7 @@ func (s *LiquidityEventStore) GetByCandidateID(ctx context.Context, candidateID 
 // GetByTimeRange retrieves events for a candidate within [start, end] (inclusive).
 func (s *LiquidityEventStore) GetByTimeRange(ctx context.Context, candidateID string, start, end int64) ([]*domain.LiquidityEvent, error) {
 	query := `
-		SELECT id, candidate_id, tx_signature, event_index, slot, timestamp, event_type, amount_token, amount_quote, liquidity_after, created_at
+		SELECT id, candidate_id, tx_signature, event_index, slot, timestamp, event_type, amount_token, amount_quote, liquidity_after, created_at, pool, mint
 		FROM liquidity_events
 		WHERE candidate_id = $1 AND timestamp >= $2 AND timestamp <= $3
 		ORDER BY timestamp ASC, id ASC
@@ -138,6 +166,7 @@ func scanLiquidityEvents(rows pgx.Rows) ([]*domain.LiquidityEvent, error) {
 
 	for rows.Next() {
 		var e domain.LiquidityEvent
+		var pool, mint *string
 
 		err := rows.Scan(
 			&e.ID,
@@ -151,9 +180,17 @@ func scanLiquidityEvents(rows pgx.Rows) ([]*domain.LiquidityEvent, error) {
 			&e.AmountQuote,
 			&e.LiquidityAfter,
 			&e.CreatedAt,
+			&pool,
+			&mint,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan liquidity event row: %w", err)
+		}
+		if pool != nil {
+			e.Pool = *pool
+		}
+		if mint != nil {
+			e.Mint = *mint
 		}
 
 		events = append(events, &e)

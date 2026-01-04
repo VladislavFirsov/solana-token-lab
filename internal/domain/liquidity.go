@@ -5,6 +5,8 @@ package domain
 type LiquidityEvent struct {
 	ID             int64   // BIGSERIAL primary key
 	CandidateID    string  // FK to token_candidates
+	Pool           string  // Pool address (AMM ID)
+	Mint           string  // Token mint address
 	TxSignature    string  // Solana transaction signature
 	EventIndex     int     // index of event within transaction
 	Slot           int64   // Solana slot number

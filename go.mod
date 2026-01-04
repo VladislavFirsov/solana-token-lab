@@ -3,8 +3,11 @@ module solana-token-lab
 go 1.24.0
 
 require (
+	filippo.io/edwards25519 v1.1.0
 	github.com/ClickHouse/clickhouse-go/v2 v2.42.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgx/v5 v5.8.0
+	github.com/mr-tron/base58 v1.2.0
 )
 
 require (

@@ -13,6 +13,14 @@ type Parser interface {
 	ParseSwapEvents(logs []string, txSig string, slot int64, timestamp int64) []*SwapEvent
 }
 
+// ParserV2 extracts swap events from transaction logs with account keys.
+// This enables extraction of mint/pool from account keys for DEXes like Raydium.
+type ParserV2 interface {
+	Parser
+	// ParseSwapEventsV2 extracts swap events using logs and account keys.
+	ParseSwapEventsV2(logs []string, accountKeys []string, txSig string, slot int64, timestamp int64) []*SwapEvent
+}
+
 // MinimalParser implements Parser with basic pattern matching.
 // This is a minimal implementation for testing; real DEX parsers would be more complex.
 type MinimalParser struct {

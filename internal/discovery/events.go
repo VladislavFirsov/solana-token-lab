@@ -8,4 +8,5 @@ type SwapEvent struct {
 	EventIndex  int     // Index of swap within transaction
 	Slot        int64   // Solana slot number
 	Timestamp   int64   // Unix timestamp in milliseconds
+	AmountOut   float64 // Output amount (token amount for volume calculations)
 }
