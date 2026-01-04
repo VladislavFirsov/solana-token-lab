@@ -193,6 +193,8 @@ func loadAggregates(ctx context.Context, store storage.StrategyAggregateStore) e
 			OutcomeMean:          0.065,
 			OutcomeMedian:        0.05, // > 0
 			OutcomeP10:           -0.02,
+			OutcomeP25:           0.02, // For outlier check
+			OutcomeP75:           0.10, // For outlier check
 			OutcomeP90:           0.15,
 			MaxDrawdown:          0.08,
 			MaxConsecutiveLosses: 3,
@@ -209,6 +211,8 @@ func loadAggregates(ctx context.Context, store storage.StrategyAggregateStore) e
 			OutcomeMean:          0.04, // > 0, ratio = 0.04/0.065 = 0.62 >= 0.5
 			OutcomeMedian:        0.03,
 			OutcomeP10:           -0.03,
+			OutcomeP25:           0.01,
+			OutcomeP75:           0.06,
 			OutcomeP90:           0.10,
 			MaxDrawdown:          0.10,
 			MaxConsecutiveLosses: 4,
@@ -222,9 +226,11 @@ func loadAggregates(ctx context.Context, store storage.StrategyAggregateStore) e
 			TotalTokens:          80,
 			WinRate:              0.06,
 			TokenWinRate:         0.05,
-			OutcomeMean:          0.02,
-			OutcomeMedian:        0.01,
+			OutcomeMean:          0.035,
+			OutcomeMedian:        0.03, // > 0, ratio = 0.03/0.05 = 0.6 >= 0.5 (GO case)
 			OutcomeP10:           -0.05,
+			OutcomeP25:           0.01, // P25 > 0 for outlier check pass
+			OutcomeP75:           0.06,
 			OutcomeP90:           0.08,
 			MaxDrawdown:          0.12,
 			MaxConsecutiveLosses: 5,
@@ -241,6 +247,8 @@ func loadAggregates(ctx context.Context, store storage.StrategyAggregateStore) e
 			OutcomeMean:          0.03,
 			OutcomeMedian:        0.02,
 			OutcomeP10:           -0.04,
+			OutcomeP25:           0.01,
+			OutcomeP75:           0.05,
 			OutcomeP90:           0.08,
 			MaxDrawdown:          0.06,
 			MaxConsecutiveLosses: 4,
@@ -257,9 +265,29 @@ func loadAggregates(ctx context.Context, store storage.StrategyAggregateStore) e
 			OutcomeMean:          0.015, // ratio = 0.015/0.03 = 0.5 >= 0.5
 			OutcomeMedian:        0.01,
 			OutcomeP10:           -0.05,
+			OutcomeP25:           0.005,
+			OutcomeP75:           0.03,
 			OutcomeP90:           0.05,
 			MaxDrawdown:          0.08,
 			MaxConsecutiveLosses: 5,
+		},
+		// TIME_EXIT, pessimistic, ACTIVE_TOKEN
+		{
+			StrategyID:           "TIME_EXIT",
+			ScenarioID:           domain.ScenarioPessimistic,
+			EntryEventType:       "ACTIVE_TOKEN",
+			TotalTrades:          50,
+			TotalTokens:          40,
+			WinRate:              0.03,
+			TokenWinRate:         0.03,
+			OutcomeMean:          0.015,
+			OutcomeMedian:        0.012, // ratio = 0.012/0.02 = 0.6 >= 0.5
+			OutcomeP10:           -0.06,
+			OutcomeP25:           0.005,
+			OutcomeP75:           0.03,
+			OutcomeP90:           0.04,
+			MaxDrawdown:          0.10,
+			MaxConsecutiveLosses: 6,
 		},
 	}
 

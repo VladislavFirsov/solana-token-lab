@@ -284,13 +284,14 @@ func TestRenderCSV_DeterministicOrder(t *testing.T) {
 	}
 
 	// Verify order: A,pessimistic < A,realistic < B,realistic
-	if !strings.HasPrefix(lines[1], "A,pessimistic") {
+	// Note: strings are now quoted per REPORTING_SPEC
+	if !strings.HasPrefix(lines[1], `"A","pessimistic"`) {
 		t.Errorf("Expected first row to be A,pessimistic, got: %s", lines[1])
 	}
-	if !strings.HasPrefix(lines[2], "A,realistic") {
+	if !strings.HasPrefix(lines[2], `"A","realistic"`) {
 		t.Errorf("Expected second row to be A,realistic, got: %s", lines[2])
 	}
-	if !strings.HasPrefix(lines[3], "B,realistic") {
+	if !strings.HasPrefix(lines[3], `"B","realistic"`) {
 		t.Errorf("Expected third row to be B,realistic, got: %s", lines[3])
 	}
 }
@@ -345,17 +346,19 @@ func TestScenarioSensitivity_Correct(t *testing.T) {
 	for _, s := range report.ScenarioSensitivity {
 		if s.StrategyID == "TIME_EXIT" && s.EntryEventType == "NEW_TOKEN" {
 			found = true
-			if s.RealisticMean != 0.025 {
-				t.Errorf("Expected RealisticMean 0.025, got %.4f", s.RealisticMean)
+			// Per REPORTING_SPEC: ScenarioSensitivity uses median, not mean
+			if s.RealisticMedian != 0.025 {
+				t.Errorf("Expected RealisticMedian 0.025, got %.4f", s.RealisticMedian)
 			}
-			if s.PessimisticMean != -0.10 {
-				t.Errorf("Expected PessimisticMean -0.10, got %.4f", s.PessimisticMean)
+			if s.PessimisticMedian != -0.10 {
+				t.Errorf("Expected PessimisticMedian -0.10, got %.4f", s.PessimisticMedian)
 			}
-			if s.DegradedMean != -0.20 {
-				t.Errorf("Expected DegradedMean -0.20, got %.4f", s.DegradedMean)
+			if s.DegradedMedian != -0.20 {
+				t.Errorf("Expected DegradedMedian -0.20, got %.4f", s.DegradedMedian)
 			}
-			// DegradationPct = (0.025 - (-0.20)) / 0.025 * 100 = 900%
-			expectedDegradation := (0.025 - (-0.20)) / 0.025 * 100
+			// DegradationPct = (realistic - pessimistic) / realistic * 100
+			// = (0.025 - (-0.10)) / 0.025 * 100 = 500%
+			expectedDegradation := (0.025 - (-0.10)) / 0.025 * 100
 			if s.DegradationPct != expectedDegradation {
 				t.Errorf("Expected DegradationPct %.2f, got %.2f", expectedDegradation, s.DegradationPct)
 			}

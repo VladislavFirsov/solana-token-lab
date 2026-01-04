@@ -71,29 +71,41 @@ func (e *Evaluator) evaluateGOCriteria(input DecisionInput) []CriterionResult {
 		Pass:      input.MedianOutcome > 0,
 	}
 
-	// 3. Stable under degradation: DegradedMean > 0 AND DegradedMean/RealisticMean >= 0.5
+	// 3. Stable under pessimistic scenario: PessimisticMedian > 0 AND PessimisticMedian/RealisticMedian >= 0.5
+	// Per DECISION_GATE.md: sensitivity analysis uses Realistic vs Pessimistic (not Degraded)
 	stabilityPass := false
 	var stabilityActual string
-	if input.RealisticMean > 0 {
-		ratio := input.DegradedMean / input.RealisticMean
-		stabilityPass = input.DegradedMean > 0 && ratio >= 0.5
-		stabilityActual = fmt.Sprintf("DegradedMean=%.4f, Ratio=%.2f", input.DegradedMean, ratio)
+	if input.RealisticMedian > 0 {
+		ratio := input.PessimisticMedian / input.RealisticMedian
+		stabilityPass = input.PessimisticMedian > 0 && ratio >= 0.5
+		stabilityActual = fmt.Sprintf("PessimisticMedian=%.4f, Ratio=%.2f", input.PessimisticMedian, ratio)
 	} else {
-		stabilityActual = fmt.Sprintf("DegradedMean=%.4f, RealisticMean=%.4f", input.DegradedMean, input.RealisticMean)
+		stabilityActual = fmt.Sprintf("PessimisticMedian=%.4f, RealisticMedian=%.4f", input.PessimisticMedian, input.RealisticMedian)
 	}
 	criteria[2] = CriterionResult{
-		Name:      "Stable under degradation",
-		Threshold: "DegradedMean > 0 AND ratio >= 0.5",
+		Name:      "Stable under pessimistic scenario",
+		Threshold: "PessimisticMedian > 0 AND ratio >= 0.5",
 		Actual:    stabilityActual,
 		Pass:      stabilityPass,
 	}
 
-	// 4. Not dominated by outliers: P50 > 0 (same as median check)
+	// 4. Not dominated by outliers: check that P25 > 0 OR (P75 - P25) / median < 3.0
+	// This verifies the distribution isn't driven by extreme tail values
+	outlierPass := false
+	var outlierActual string
+	if input.OutcomeP50 != 0 {
+		iqrRatio := (input.OutcomeP75 - input.OutcomeP25) / input.OutcomeP50
+		outlierPass = input.OutcomeP25 > 0 || iqrRatio < 3.0
+		outlierActual = fmt.Sprintf("P25=%.4f, IQR/median=%.2f", input.OutcomeP25, iqrRatio)
+	} else {
+		outlierPass = input.OutcomeP25 > 0
+		outlierActual = fmt.Sprintf("P25=%.4f, P50=0 (undefined ratio)", input.OutcomeP25)
+	}
 	criteria[3] = CriterionResult{
 		Name:      "Not dominated by outliers",
-		Threshold: "P50 > 0",
-		Actual:    fmt.Sprintf("%.4f", input.OutcomeP50),
-		Pass:      input.OutcomeP50 > 0,
+		Threshold: "P25 > 0 OR IQR/median < 3.0",
+		Actual:    outlierActual,
+		Pass:      outlierPass,
 	}
 
 	// 5. Entry/exit implementable: StrategyImplementable == true
@@ -130,12 +142,13 @@ func (e *Evaluator) evaluateNOGOTriggers(input DecisionInput) []CriterionResult 
 		Pass:      !triggered2,
 	}
 
-	// 3. Edge disappears: RealisticMean > 0 && DegradedMean <= 0 triggers NO-GO
-	triggered3 := input.RealisticMean > 0 && input.DegradedMean <= 0
+	// 3. Edge disappears: RealisticMedian > 0 && PessimisticMedian <= 0 triggers NO-GO
+	// Per DECISION_GATE.md: sensitivity uses Realistic vs Pessimistic
+	triggered3 := input.RealisticMedian > 0 && input.PessimisticMedian <= 0
 	checks[2] = CriterionResult{
-		Name:      "Edge disappears under degradation",
-		Threshold: "RealisticMean > 0 AND DegradedMean <= 0",
-		Actual:    fmt.Sprintf("RealisticMean=%.4f, DegradedMean=%.4f", input.RealisticMean, input.DegradedMean),
+		Name:      "Edge disappears under pessimistic scenario",
+		Threshold: "RealisticMedian > 0 AND PessimisticMedian <= 0",
+		Actual:    fmt.Sprintf("RealisticMedian=%.4f, PessimisticMedian=%.4f", input.RealisticMedian, input.PessimisticMedian),
 		Pass:      !triggered3,
 	}
 

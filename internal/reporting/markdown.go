@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// RenderMarkdown renders report as Markdown string.
+// RenderMarkdown renders report as Markdown string per REPORTING_SPEC.md.
 func RenderMarkdown(r *Report) string {
 	var sb strings.Builder
 
@@ -15,7 +15,27 @@ func RenderMarkdown(r *Report) string {
 	sb.WriteString(fmt.Sprintf("Generated: %s\n\n", r.GeneratedAt.Format(time.RFC3339)))
 	sb.WriteString(fmt.Sprintf("Strategies: %d | Scenarios: %d\n\n", r.StrategyCount, r.ScenarioCount))
 
-	// Data Summary
+	// Executive Summary (per REPORTING_SPEC.md)
+	sb.WriteString("## Executive Summary\n\n")
+	sb.WriteString("| Metric | Value |\n")
+	sb.WriteString("|--------|-------|\n")
+	sb.WriteString(fmt.Sprintf("| Decision | %s |\n", r.ExecutiveSummary.Decision))
+	if r.ExecutiveSummary.BestStrategy != "" {
+		sb.WriteString(fmt.Sprintf("| Best Strategy | %s (%s) |\n", r.ExecutiveSummary.BestStrategy, r.ExecutiveSummary.BestEntryType))
+	}
+	sb.WriteString(fmt.Sprintf("| Win Rate (Realistic) | %.2f%% |\n", r.ExecutiveSummary.WinRateRealistic*100))
+	sb.WriteString(fmt.Sprintf("| Median Outcome (Realistic) | %.4f |\n", r.ExecutiveSummary.MedianRealistic))
+	sb.WriteString(fmt.Sprintf("| Median Outcome (Pessimistic) | %.4f |\n", r.ExecutiveSummary.MedianPessimistic))
+	if !r.ExecutiveSummary.DataPeriodStart.IsZero() {
+		sb.WriteString(fmt.Sprintf("| Data Period | %s to %s |\n",
+			r.ExecutiveSummary.DataPeriodStart.Format(time.RFC3339),
+			r.ExecutiveSummary.DataPeriodEnd.Format(time.RFC3339)))
+	}
+	sb.WriteString(fmt.Sprintf("| NEW_TOKEN Candidates | %d |\n", r.ExecutiveSummary.NewTokenCount))
+	sb.WriteString(fmt.Sprintf("| ACTIVE_TOKEN Candidates | %d |\n", r.ExecutiveSummary.ActiveTokenCount))
+	sb.WriteString("\n")
+
+	// Data Summary with ISO timestamps (per REPORTING_SPEC.md)
 	sb.WriteString("## Data Summary\n\n")
 	sb.WriteString("| Metric | Value |\n")
 	sb.WriteString("|--------|-------|\n")
@@ -23,8 +43,18 @@ func RenderMarkdown(r *Report) string {
 	sb.WriteString(fmt.Sprintf("| NEW_TOKEN Candidates | %d |\n", r.DataSummary.NewTokenCandidates))
 	sb.WriteString(fmt.Sprintf("| ACTIVE_TOKEN Candidates | %d |\n", r.DataSummary.ActiveTokenCandidates))
 	sb.WriteString(fmt.Sprintf("| Total Trades | %d |\n", r.DataSummary.TotalTrades))
-	sb.WriteString(fmt.Sprintf("| Date Range Start (ms) | %d |\n", r.DataSummary.DateRangeStart))
-	sb.WriteString(fmt.Sprintf("| Date Range End (ms) | %d |\n", r.DataSummary.DateRangeEnd))
+
+	// Format timestamps as ISO 8601 and calculate duration
+	if r.DataSummary.DateRangeStart > 0 && r.DataSummary.DateRangeEnd > 0 {
+		startTime := time.UnixMilli(r.DataSummary.DateRangeStart).UTC()
+		endTime := time.UnixMilli(r.DataSummary.DateRangeEnd).UTC()
+		duration := endTime.Sub(startTime)
+		durationDays := duration.Hours() / 24
+
+		sb.WriteString(fmt.Sprintf("| Date Range Start | %s |\n", startTime.Format(time.RFC3339)))
+		sb.WriteString(fmt.Sprintf("| Date Range End | %s |\n", endTime.Format(time.RFC3339)))
+		sb.WriteString(fmt.Sprintf("| Duration | %.1f days |\n", durationDays))
+	}
 	sb.WriteString("\n")
 
 	// Data Quality
@@ -62,52 +92,76 @@ func RenderMarkdown(r *Report) string {
 		sb.WriteString("\n")
 	}
 
-	// Strategy Metrics
+	// Strategy Metrics with full columns (per REPORTING_SPEC.md)
 	sb.WriteString("## Strategy Metrics\n\n")
 	if len(r.StrategyMetrics) > 0 {
-		sb.WriteString("| Strategy | Scenario | Entry | Trades | Tokens | WinRate | TokenWinRate | Mean | Median | P10 | P90 | MaxDD | MaxLoss |\n")
-		sb.WriteString("|----------|----------|-------|--------|--------|---------|--------------|------|--------|-----|-----|-------|--------|\n")
+		sb.WriteString("| Strategy | Scenario | Entry | Trades | Wins | Losses | WinRate | Mean | Median | P10 | P25 | P75 | P90 | Min | Max | Stddev | MaxDD | MaxLoss |\n")
+		sb.WriteString("|----------|----------|-------|--------|------|--------|---------|------|--------|-----|-----|-----|-----|-----|-----|--------|-------|--------|\n")
 		for _, m := range r.StrategyMetrics {
-			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %d | %d | %.4f | %.4f | %.4f | %.4f | %.4f | %.4f | %.4f | %d |\n",
+			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %d | %d | %d | %.4f | %.4f | %.4f | %.4f | %.4f | %.4f | %.4f | %.4f | %.4f | %.4f | %.4f | %d |\n",
 				m.StrategyID, m.ScenarioID, m.EntryEventType,
-				m.TotalTrades, m.TotalTokens, m.WinRate, m.TokenWinRate, m.OutcomeMean, m.OutcomeMedian,
-				m.OutcomeP10, m.OutcomeP90, m.MaxDrawdown, m.MaxConsecutiveLosses))
+				m.TotalTrades, m.Wins, m.Losses, m.WinRate,
+				m.OutcomeMean, m.OutcomeMedian,
+				m.OutcomeP10, m.OutcomeP25, m.OutcomeP75, m.OutcomeP90,
+				m.OutcomeMin, m.OutcomeMax, m.OutcomeStddev,
+				m.MaxDrawdown, m.MaxConsecutiveLosses))
 		}
 	} else {
 		sb.WriteString("No strategy metrics available.\n")
 	}
 	sb.WriteString("\n")
 
-	// Source Comparison
-	sb.WriteString("## NEW_TOKEN vs ACTIVE_TOKEN Comparison\n\n")
+	// Source Comparison with delta (per REPORTING_SPEC.md: Realistic only)
+	sb.WriteString("## NEW_TOKEN vs ACTIVE_TOKEN Comparison (Realistic Scenario)\n\n")
 	if len(r.SourceComparison) > 0 {
-		sb.WriteString("| Strategy | Scenario | NEW WinRate | ACTIVE WinRate | NEW Median | ACTIVE Median |\n")
-		sb.WriteString("|----------|----------|-------------|----------------|------------|---------------|\n")
+		sb.WriteString("| Strategy | NEW WinRate | ACTIVE WinRate | Δ WinRate | NEW Median | ACTIVE Median | Δ Median |\n")
+		sb.WriteString("|----------|-------------|----------------|-----------|------------|---------------|----------|\n")
 		for _, c := range r.SourceComparison {
-			sb.WriteString(fmt.Sprintf("| %s | %s | %.4f | %.4f | %.4f | %.4f |\n",
-				c.StrategyID, c.ScenarioID,
-				c.NewTokenWinRate, c.ActiveTokenWinRate,
-				c.NewTokenMedian, c.ActiveTokenMedian))
+			sb.WriteString(fmt.Sprintf("| %s | %.4f | %.4f | %.4f | %.4f | %.4f | %.4f |\n",
+				c.StrategyID,
+				c.NewTokenWinRate, c.ActiveTokenWinRate, c.DeltaWinRate,
+				c.NewTokenMedian, c.ActiveTokenMedian, c.DeltaMedian))
 		}
 	} else {
 		sb.WriteString("No source comparison available.\n")
 	}
 	sb.WriteString("\n")
 
-	// Scenario Sensitivity
-	sb.WriteString("## Scenario Sensitivity\n\n")
+	// Scenario Sensitivity with median and optimistic (per REPORTING_SPEC.md)
+	sb.WriteString("## Scenario Sensitivity (Median Outcomes)\n\n")
 	if len(r.ScenarioSensitivity) > 0 {
-		sb.WriteString("| Strategy | Entry | Realistic | Pessimistic | Degraded | Degradation% |\n")
-		sb.WriteString("|----------|-------|-----------|-------------|----------|-------------|\n")
+		sb.WriteString("| Strategy | Entry | Optimistic | Realistic | Pessimistic | Degraded | Δ% (R→P) |\n")
+		sb.WriteString("|----------|-------|------------|-----------|-------------|----------|----------|\n")
 		for _, s := range r.ScenarioSensitivity {
-			sb.WriteString(fmt.Sprintf("| %s | %s | %.4f | %.4f | %.4f | %.2f |\n",
+			sb.WriteString(fmt.Sprintf("| %s | %s | %.4f | %.4f | %.4f | %.4f | %.2f%% |\n",
 				s.StrategyID, s.EntryEventType,
-				s.RealisticMean, s.PessimisticMean, s.DegradedMean, s.DegradationPct))
+				s.OptimisticMedian, s.RealisticMedian, s.PessimisticMedian, s.DegradedMedian,
+				s.DegradationPct))
 		}
 	} else {
 		sb.WriteString("No scenario sensitivity data available.\n")
 	}
 	sb.WriteString("\n")
+
+	// Reproducibility (per REPORTING_SPEC.md)
+	sb.WriteString("## Reproducibility\n\n")
+	sb.WriteString("| Metadata | Value |\n")
+	sb.WriteString("|----------|-------|\n")
+	sb.WriteString(fmt.Sprintf("| Report Timestamp | %s |\n", r.Reproducibility.ReportTimestamp.Format(time.RFC3339)))
+	sb.WriteString(fmt.Sprintf("| Generator Version | %s |\n", r.Reproducibility.GeneratorVersion))
+	sb.WriteString(fmt.Sprintf("| Data Version | %s |\n", r.Reproducibility.DataVersion))
+	sb.WriteString(fmt.Sprintf("| Strategy Version | %s |\n", r.Reproducibility.StrategyVersion))
+	sb.WriteString(fmt.Sprintf("| Replay Commit | %s |\n", r.Reproducibility.ReplayCommitHash))
+	if r.Reproducibility.ReplayCommand != "" {
+		sb.WriteString(fmt.Sprintf("| Replay Command | `%s` |\n", r.Reproducibility.ReplayCommand))
+	}
+	sb.WriteString("\n")
+
+	// Decision Checklist reference
+	if r.DecisionChecklistRef != "" {
+		sb.WriteString("## Decision Checklist\n\n")
+		sb.WriteString(fmt.Sprintf("See: %s\n\n", r.DecisionChecklistRef))
+	}
 
 	// Replay References
 	sb.WriteString("## Replay References\n\n")

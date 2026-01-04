@@ -11,13 +11,18 @@ func TestEvaluate_GO(t *testing.T) {
 	evaluator := NewEvaluator()
 
 	// All criteria pass, no triggers
+	// Per DECISION_GATE.md: stability uses Pessimistic vs Realistic
 	input := DecisionInput{
 		PositiveOutcomePct:    10.0, // >= 5%
 		MedianOutcome:         0.05, // > 0
 		RealisticMean:         0.08,
-		DegradedMean:          0.05, // > 0 and ratio = 0.625 >= 0.5
+		RealisticMedian:       0.05,
+		PessimisticMean:       0.04,
+		PessimisticMedian:     0.03, // > 0 and ratio = 0.6 >= 0.5
 		OutcomeP10:            -0.02,
+		OutcomeP25:            0.02,
 		OutcomeP50:            0.05, // > 0
+		OutcomeP75:            0.10,
 		OutcomeP90:            0.15,
 		StrategyImplementable: true,
 		StrategyID:            "TIME_EXIT",
@@ -56,8 +61,12 @@ func TestEvaluate_NOGO_LowPositiveOutcome(t *testing.T) {
 		PositiveOutcomePct:    3.0, // < 5% - triggers NO-GO
 		MedianOutcome:         0.05,
 		RealisticMean:         0.08,
-		DegradedMean:          0.05,
+		RealisticMedian:       0.05,
+		PessimisticMean:       0.04,
+		PessimisticMedian:     0.03,
+		OutcomeP25:            0.02,
 		OutcomeP50:            0.05,
+		OutcomeP75:            0.10,
 		StrategyImplementable: true,
 		StrategyID:            "TEST",
 		ScenarioID:            domain.ScenarioRealistic,
@@ -90,8 +99,12 @@ func TestEvaluate_NOGO_NegativeMedian(t *testing.T) {
 		PositiveOutcomePct:    10.0,
 		MedianOutcome:         -0.02, // <= 0 - triggers NO-GO
 		RealisticMean:         0.01,
-		DegradedMean:          0.005,
+		RealisticMedian:       -0.02,
+		PessimisticMean:       0.005,
+		PessimisticMedian:     0.002,
+		OutcomeP25:            -0.05,
 		OutcomeP50:            -0.02,
+		OutcomeP75:            0.05,
 		StrategyImplementable: true,
 		StrategyID:            "TEST",
 		ScenarioID:            domain.ScenarioRealistic,
@@ -120,12 +133,17 @@ func TestEvaluate_NOGO_NegativeMedian(t *testing.T) {
 func TestEvaluate_NOGO_EdgeDisappears(t *testing.T) {
 	evaluator := NewEvaluator()
 
+	// Per DECISION_GATE.md: edge disappears = Realistic > 0 but Pessimistic <= 0
 	input := DecisionInput{
 		PositiveOutcomePct:    10.0,
 		MedianOutcome:         0.05,
-		RealisticMean:         0.08, // > 0
-		DegradedMean:          -0.02, // <= 0 - edge disappears
+		RealisticMean:         0.08,
+		RealisticMedian:       0.05, // > 0
+		PessimisticMean:       -0.01,
+		PessimisticMedian:     -0.02, // <= 0 - edge disappears
+		OutcomeP25:            0.02,
 		OutcomeP50:            0.05,
+		OutcomeP75:            0.10,
 		StrategyImplementable: true,
 		StrategyID:            "TEST",
 		ScenarioID:            domain.ScenarioRealistic,
@@ -158,8 +176,12 @@ func TestEvaluate_NOGO_NotImplementable(t *testing.T) {
 		PositiveOutcomePct:    10.0,
 		MedianOutcome:         0.05,
 		RealisticMean:         0.08,
-		DegradedMean:          0.05,
+		RealisticMedian:       0.05,
+		PessimisticMean:       0.04,
+		PessimisticMedian:     0.03,
+		OutcomeP25:            0.02,
 		OutcomeP50:            0.05,
+		OutcomeP75:            0.10,
 		StrategyImplementable: false, // not implementable - triggers NO-GO
 		StrategyID:            "TEST",
 		ScenarioID:            domain.ScenarioRealistic,
@@ -192,9 +214,13 @@ func TestEvaluate_Deterministic(t *testing.T) {
 		PositiveOutcomePct:    10.0,
 		MedianOutcome:         0.05,
 		RealisticMean:         0.08,
-		DegradedMean:          0.05,
+		RealisticMedian:       0.05,
+		PessimisticMean:       0.04,
+		PessimisticMedian:     0.03,
 		OutcomeP10:            -0.02,
+		OutcomeP25:            0.02,
 		OutcomeP50:            0.05,
+		OutcomeP75:            0.10,
 		OutcomeP90:            0.15,
 		StrategyImplementable: true,
 		StrategyID:            "TIME_EXIT",

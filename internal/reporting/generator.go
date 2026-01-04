@@ -141,12 +141,19 @@ func (g *Generator) generateStrategyMetrics(aggs []*domain.StrategyAggregate) []
 			EntryEventType:       agg.EntryEventType,
 			TotalTrades:          agg.TotalTrades,
 			TotalTokens:          agg.TotalTokens,
+			Wins:                 agg.Wins,
+			Losses:               agg.Losses,
 			WinRate:              agg.WinRate,
 			TokenWinRate:         agg.TokenWinRate,
 			OutcomeMean:          agg.OutcomeMean,
 			OutcomeMedian:        agg.OutcomeMedian,
 			OutcomeP10:           agg.OutcomeP10,
+			OutcomeP25:           agg.OutcomeP25,
+			OutcomeP75:           agg.OutcomeP75,
 			OutcomeP90:           agg.OutcomeP90,
+			OutcomeMin:           agg.OutcomeMin,
+			OutcomeMax:           agg.OutcomeMax,
+			OutcomeStddev:        agg.OutcomeStddev,
 			MaxDrawdown:          agg.MaxDrawdown,
 			MaxConsecutiveLosses: agg.MaxConsecutiveLosses,
 		}
@@ -158,25 +165,25 @@ func (g *Generator) generateStrategyMetrics(aggs []*domain.StrategyAggregate) []
 }
 
 // generateSourceComparison builds NEW_TOKEN vs ACTIVE_TOKEN comparison.
+// Per REPORTING_SPEC.md: only Realistic scenario, with delta columns.
 func (g *Generator) generateSourceComparison(aggs []*domain.StrategyAggregate) []SourceComparisonRow {
-	// Group by (strategy_id, scenario_id)
-	type key struct {
-		StrategyID string
-		ScenarioID string
-	}
-	groups := make(map[key]map[string]*domain.StrategyAggregate)
+	// Group by strategy_id (Realistic scenario only)
+	groups := make(map[string]map[string]*domain.StrategyAggregate)
 
 	for _, agg := range aggs {
-		k := key{StrategyID: agg.StrategyID, ScenarioID: agg.ScenarioID}
-		if groups[k] == nil {
-			groups[k] = make(map[string]*domain.StrategyAggregate)
+		// Filter to Realistic scenario only per REPORTING_SPEC.md
+		if agg.ScenarioID != domain.ScenarioRealistic {
+			continue
 		}
-		groups[k][agg.EntryEventType] = agg
+		if groups[agg.StrategyID] == nil {
+			groups[agg.StrategyID] = make(map[string]*domain.StrategyAggregate)
+		}
+		groups[agg.StrategyID][agg.EntryEventType] = agg
 	}
 
 	// Build comparison rows
 	var rows []SourceComparisonRow
-	for k, entryTypes := range groups {
+	for strategyID, entryTypes := range groups {
 		newAgg := entryTypes["NEW_TOKEN"]
 		activeAgg := entryTypes["ACTIVE_TOKEN"]
 
@@ -186,8 +193,8 @@ func (g *Generator) generateSourceComparison(aggs []*domain.StrategyAggregate) [
 		}
 
 		row := SourceComparisonRow{
-			StrategyID: k.StrategyID,
-			ScenarioID: k.ScenarioID,
+			StrategyID: strategyID,
+			ScenarioID: domain.ScenarioRealistic,
 		}
 
 		if newAgg != nil {
@@ -199,21 +206,23 @@ func (g *Generator) generateSourceComparison(aggs []*domain.StrategyAggregate) [
 			row.ActiveTokenMedian = activeAgg.OutcomeMedian
 		}
 
+		// Calculate deltas (per REPORTING_SPEC.md)
+		row.DeltaWinRate = row.NewTokenWinRate - row.ActiveTokenWinRate
+		row.DeltaMedian = row.NewTokenMedian - row.ActiveTokenMedian
+
 		rows = append(rows, row)
 	}
 
-	// Sort by (strategy_id, scenario_id)
+	// Sort by strategy_id
 	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].StrategyID != rows[j].StrategyID {
-			return rows[i].StrategyID < rows[j].StrategyID
-		}
-		return rows[i].ScenarioID < rows[j].ScenarioID
+		return rows[i].StrategyID < rows[j].StrategyID
 	})
 
 	return rows
 }
 
 // generateScenarioSensitivity builds scenario sensitivity comparison.
+// Per REPORTING_SPEC.md: uses median (not mean) and includes all 4 scenarios.
 func (g *Generator) generateScenarioSensitivity(aggs []*domain.StrategyAggregate) []ScenarioSensitivityRow {
 	// Group by (strategy_id, entry_event_type)
 	type key struct {
@@ -230,7 +239,7 @@ func (g *Generator) generateScenarioSensitivity(aggs []*domain.StrategyAggregate
 		groups[k][agg.ScenarioID] = agg
 	}
 
-	// Build sensitivity rows
+	// Build sensitivity rows using median (per REPORTING_SPEC.md)
 	var rows []ScenarioSensitivityRow
 	for k, scenarios := range groups {
 		row := ScenarioSensitivityRow{
@@ -238,19 +247,24 @@ func (g *Generator) generateScenarioSensitivity(aggs []*domain.StrategyAggregate
 			EntryEventType: k.EntryEventType,
 		}
 
+		// Use median instead of mean per REPORTING_SPEC.md
+		if optimistic := scenarios[domain.ScenarioOptimistic]; optimistic != nil {
+			row.OptimisticMedian = optimistic.OutcomeMedian
+		}
 		if realistic := scenarios[domain.ScenarioRealistic]; realistic != nil {
-			row.RealisticMean = realistic.OutcomeMean
+			row.RealisticMedian = realistic.OutcomeMedian
 		}
 		if pessimistic := scenarios[domain.ScenarioPessimistic]; pessimistic != nil {
-			row.PessimisticMean = pessimistic.OutcomeMean
+			row.PessimisticMedian = pessimistic.OutcomeMedian
 		}
 		if degraded := scenarios[domain.ScenarioDegraded]; degraded != nil {
-			row.DegradedMean = degraded.OutcomeMean
+			row.DegradedMedian = degraded.OutcomeMedian
 		}
 
-		// Calculate degradation percentage: (realistic - degraded) / realistic * 100
-		if row.RealisticMean != 0 {
-			row.DegradationPct = (row.RealisticMean - row.DegradedMean) / row.RealisticMean * 100
+		// Calculate degradation percentage: (realistic - pessimistic) / realistic * 100
+		// Per DECISION_GATE.md: sensitivity uses Realistic vs Pessimistic
+		if row.RealisticMedian != 0 {
+			row.DegradationPct = (row.RealisticMedian - row.PessimisticMedian) / row.RealisticMedian * 100
 		}
 
 		rows = append(rows, row)

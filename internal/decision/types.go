@@ -32,13 +32,20 @@ type DecisionInput struct {
 	// Median outcome (realistic scenario)
 	MedianOutcome float64
 
-	// Outcome means for stability check
-	RealisticMean float64
-	DegradedMean  float64
+	// Outcome metrics for stability check (Realistic vs Pessimistic per DECISION_GATE.md)
+	RealisticMean      float64
+	RealisticMedian    float64
+	PessimisticMean    float64
+	PessimisticMedian  float64
 
-	// Quantiles for outlier check (P25/P75 not available in source, not used in criteria)
+	// Legacy field for backwards compatibility (kept but not used in stability check)
+	DegradedMean float64
+
+	// Quantiles for outlier check
 	OutcomeP10 float64
-	OutcomeP50 float64 // Same as MedianOutcome, used for outlier check
+	OutcomeP25 float64 // 25th percentile for outlier check
+	OutcomeP50 float64 // Same as MedianOutcome
+	OutcomeP75 float64 // 75th percentile for outlier check
 	OutcomeP90 float64
 
 	// Strategy implementability (true if strategy exists and delay within scenario)

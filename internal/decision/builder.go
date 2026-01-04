@@ -11,6 +11,10 @@ import (
 // ErrNoRealisticScenario is returned when no realistic scenario data is found.
 var ErrNoRealisticScenario = errors.New("no realistic scenario data found")
 
+// ErrMissingPessimisticScenario is returned when pessimistic scenario data is missing.
+// Per spec, full scenario matrix is required for valid decision.
+var ErrMissingPessimisticScenario = errors.New("missing pessimistic scenario data")
+
 // StrategyKey identifies a strategy for implementability lookup.
 type StrategyKey struct {
 	StrategyID     string
@@ -56,7 +60,19 @@ func (b *Builder) Build(report *reporting.Report, strategyID, entryEventType str
 		return nil, ErrStrategyNotFound
 	}
 
-	// Find corresponding degraded scenario for stability check
+	// Find corresponding pessimistic scenario for stability check (per DECISION_GATE.md)
+	var pessimisticMean, pessimisticMedian float64
+	for _, m := range report.StrategyMetrics {
+		if m.StrategyID == strategyID &&
+			m.EntryEventType == entryEventType &&
+			m.ScenarioID == domain.ScenarioPessimistic {
+			pessimisticMean = m.OutcomeMean
+			pessimisticMedian = m.OutcomeMedian
+			break
+		}
+	}
+
+	// Also get degraded for backwards compatibility
 	var degradedMean float64
 	for _, m := range report.StrategyMetrics {
 		if m.StrategyID == strategyID &&
@@ -76,9 +92,14 @@ func (b *Builder) Build(report *reporting.Report, strategyID, entryEventType str
 		PositiveOutcomePct: realisticMetric.TokenWinRate * 100, // TokenWinRate is 0-1, convert to percentage (token-level)
 		MedianOutcome:      realisticMetric.OutcomeMedian,
 		RealisticMean:      realisticMetric.OutcomeMean,
-		DegradedMean:       degradedMean,
+		RealisticMedian:    realisticMetric.OutcomeMedian,
+		PessimisticMean:    pessimisticMean,
+		PessimisticMedian:  pessimisticMedian,
+		DegradedMean:       degradedMean, // backwards compatibility
 		OutcomeP10:         realisticMetric.OutcomeP10,
+		OutcomeP25:         realisticMetric.OutcomeP25,
 		OutcomeP50:         realisticMetric.OutcomeMedian, // P50 = median
+		OutcomeP75:         realisticMetric.OutcomeP75,
 		OutcomeP90:         realisticMetric.OutcomeP90,
 
 		// Strategy implementability from explicit map
@@ -102,6 +123,7 @@ func (b *Builder) Build(report *reporting.Report, strategyID, entryEventType str
 // Returns a slice of inputs, one per (strategy_id, entry_event_type) combination.
 func (b *Builder) BuildAll(report *reporting.Report) ([]*DecisionInput, error) {
 	realisticMetrics := make(map[StrategyKey]*reporting.StrategyMetricRow)
+	pessimisticMetrics := make(map[StrategyKey]*reporting.StrategyMetricRow)
 	degradedMetrics := make(map[StrategyKey]*reporting.StrategyMetricRow)
 
 	for i := range report.StrategyMetrics {
@@ -111,6 +133,8 @@ func (b *Builder) BuildAll(report *reporting.Report) ([]*DecisionInput, error) {
 		switch m.ScenarioID {
 		case domain.ScenarioRealistic:
 			realisticMetrics[k] = m
+		case domain.ScenarioPessimistic:
+			pessimisticMetrics[k] = m
 		case domain.ScenarioDegraded:
 			degradedMetrics[k] = m
 		}
@@ -135,7 +159,18 @@ func (b *Builder) BuildAll(report *reporting.Report) ([]*DecisionInput, error) {
 	inputs := make([]*DecisionInput, 0, len(keys))
 	for _, k := range keys {
 		realistic := realisticMetrics[k]
-		degradedMean := 0.0
+
+		// Get pessimistic metrics for stability check (per DECISION_GATE.md)
+		// Missing pessimistic scenario is treated as insufficient data
+		pessimistic, hasPessimistic := pessimisticMetrics[k]
+		if !hasPessimistic {
+			return nil, ErrMissingPessimisticScenario
+		}
+		pessimisticMean := pessimistic.OutcomeMean
+		pessimisticMedian := pessimistic.OutcomeMedian
+
+		// Get degraded for backwards compatibility
+		var degradedMean float64
 		if degraded, ok := degradedMetrics[k]; ok {
 			degradedMean = degraded.OutcomeMean
 		}
@@ -147,9 +182,14 @@ func (b *Builder) BuildAll(report *reporting.Report) ([]*DecisionInput, error) {
 			PositiveOutcomePct:    realistic.TokenWinRate * 100, // TokenWinRate is 0-1, convert to percentage (token-level)
 			MedianOutcome:         realistic.OutcomeMedian,
 			RealisticMean:         realistic.OutcomeMean,
-			DegradedMean:          degradedMean,
+			RealisticMedian:       realistic.OutcomeMedian,
+			PessimisticMean:       pessimisticMean,
+			PessimisticMedian:     pessimisticMedian,
+			DegradedMean:          degradedMean, // backwards compatibility
 			OutcomeP10:            realistic.OutcomeP10,
+			OutcomeP25:            realistic.OutcomeP25,
 			OutcomeP50:            realistic.OutcomeMedian,
+			OutcomeP75:            realistic.OutcomeP75,
 			OutcomeP90:            realistic.OutcomeP90,
 			StrategyImplementable: implementable,
 			StrategyID:            realistic.StrategyID,

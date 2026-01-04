@@ -66,9 +66,15 @@ func main() {
 	}
 
 	// Define implementable strategies
+	// TIME_EXIT is implementable (simple time-based exit)
+	// TRAILING_STOP and LIQUIDITY_GUARD require real-time price/liquidity feeds - not yet implementable
 	implementable := map[decision.StrategyKey]bool{
-		{StrategyID: "TIME_EXIT", EntryEventType: "NEW_TOKEN"}:    true,
-		{StrategyID: "TIME_EXIT", EntryEventType: "ACTIVE_TOKEN"}: true,
+		{StrategyID: "TIME_EXIT", EntryEventType: "NEW_TOKEN"}:         true,
+		{StrategyID: "TIME_EXIT", EntryEventType: "ACTIVE_TOKEN"}:      true,
+		{StrategyID: "TRAILING_STOP", EntryEventType: "NEW_TOKEN"}:     false,
+		{StrategyID: "TRAILING_STOP", EntryEventType: "ACTIVE_TOKEN"}:  false,
+		{StrategyID: "LIQUIDITY_GUARD", EntryEventType: "NEW_TOKEN"}:   false,
+		{StrategyID: "LIQUIDITY_GUARD", EntryEventType: "ACTIVE_TOKEN"}: false,
 	}
 
 	// Create replay runner for replayability check
@@ -91,6 +97,13 @@ func main() {
 		replayRunner,
 	).WithAggregator(aggregator).WithClock(func() time.Time { return fixedTime })
 
+	// Set data source for replay command
+	if *useFixtures {
+		p = p.WithDataSource("fixtures")
+	} else {
+		p = p.WithDBSource(*postgresDSN, *clickhouseDSN)
+	}
+
 	// Run pipeline
 	if err := p.Run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running pipeline: %v\n", err)
@@ -99,7 +112,9 @@ func main() {
 
 	fmt.Println("Phase 1 report generated successfully:")
 	fmt.Printf("  - %s/REPORT_PHASE1.md\n", *outputDir)
-	fmt.Printf("  - %s/STRATEGY_AGGREGATES.csv\n", *outputDir)
+	fmt.Printf("  - %s/strategy_aggregates.csv\n", *outputDir)
+	fmt.Printf("  - %s/trade_records.csv\n", *outputDir)
+	fmt.Printf("  - %s/scenario_outcomes.csv\n", *outputDir)
 	fmt.Printf("  - %s/DECISION_GATE_REPORT.md\n", *outputDir)
 }
 
@@ -171,19 +186,38 @@ func createDatabaseStores(ctx context.Context, postgresDSN, clickhouseDSN string
 }
 
 // computeAllAggregates computes aggregates for all strategy/scenario/entry combinations.
+// Idempotent: ignores ErrDuplicateKey if aggregate already exists.
 func computeAllAggregates(ctx context.Context, agg *metrics.Aggregator) error {
-	strategies := []string{domain.StrategyTypeTimeExit}
-	scenarios := []string{domain.ScenarioRealistic, domain.ScenarioPessimistic, domain.ScenarioDegraded}
+	// All 3 strategies per STRATEGY_CATALOG.md
+	strategies := []string{
+		domain.StrategyTypeTimeExit,
+		domain.StrategyTypeTrailingStop,
+		domain.StrategyTypeLiquidityGuard,
+	}
+	// All 4 scenarios per EXECUTION_SCENARIOS.md
+	scenarios := []string{
+		domain.ScenarioOptimistic,
+		domain.ScenarioRealistic,
+		domain.ScenarioPessimistic,
+		domain.ScenarioDegraded,
+	}
 	entryTypes := []string{"NEW_TOKEN", "ACTIVE_TOKEN"}
 
 	for _, strategy := range strategies {
 		for _, scenario := range scenarios {
 			for _, entry := range entryTypes {
 				_, err := agg.ComputeAndStore(ctx, strategy, scenario, entry)
-				if err != nil && !errors.Is(err, metrics.ErrNoTrades) {
+				if err != nil {
+					// ErrNoTrades is expected for some combinations (e.g., no trades in fixtures)
+					if errors.Is(err, metrics.ErrNoTrades) {
+						continue
+					}
+					// ErrDuplicateKey means aggregate already exists - idempotent behavior
+					if errors.Is(err, storage.ErrDuplicateKey) {
+						continue
+					}
 					return fmt.Errorf("compute aggregate %s/%s/%s: %w", strategy, scenario, entry, err)
 				}
-				// ErrNoTrades is expected for some combinations (e.g., no pessimistic trades in fixtures)
 			}
 		}
 	}
