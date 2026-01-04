@@ -1,4 +1,4 @@
-# Decision Gate — Phase 1 GO/NO-GO
+# Decision Gate - Phase 1 GO/NO-GO
 
 ## Purpose
 - Binary GO/NO-GO decision for Phase 1
@@ -13,14 +13,14 @@ Before evaluation, all items must be verified:
 
 | # | Criterion | Required | Actual | Pass |
 |---|-----------|----------|--------|------|
-| 1 | Unique NEW_TOKEN candidates discovered | ≥300 | ___ | [ ] |
-| 2 | Continuous discovery uptime | ≥7 days | ___ | [ ] |
-| 3 | Data available for backtest | ≥14 days | ___ | [ ] |
+| 1 | Unique NEW_TOKEN candidates discovered | >=300 | ___ | [ ] |
+| 2 | Continuous discovery uptime | >=7 days | ___ | [ ] |
+| 3 | Data available for backtest | >=14 days | ___ | [ ] |
 | 4 | Duplicate candidate_id count | 0 | ___ | [ ] |
 | 5 | Missing events in evaluation period | 0 | ___ | [ ] |
 | 6 | Tokens fully replayable from stored data | 100% | ___ | [ ] |
 
-**If any item fails → STOP. Insufficient data for decision.**
+**If any item fails -> STOP. Insufficient data for decision.**
 
 ---
 
@@ -54,7 +54,7 @@ Results must be provided for all scenarios:
 
 | # | Criterion | Threshold | Actual | Pass |
 |---|-----------|-----------|--------|------|
-| 1 | Tokens with positive outcome | ≥5% | ___ | [ ] |
+| 1 | Tokens with positive outcome | >=5% | ___ | [ ] |
 | 2 | Median outcome | >0 | ___ | [ ] |
 | 3 | Result stable under parameter degradation | per MVP criteria | ___ | [ ] |
 | 4 | Result not driven by outliers | quantiles reported and checked | ___ | [ ] |
@@ -69,7 +69,7 @@ Results must be provided for all scenarios:
 | # | Criterion | Trigger Condition | Actual | Triggered |
 |---|-----------|-------------------|--------|-----------|
 | 1 | Tokens with positive outcome | <5% | ___ | [ ] |
-| 2 | Median outcome | ≤0 | ___ | [ ] |
+| 2 | Median outcome | <=0 | ___ | [ ] |
 | 3 | Edge under small degradation | disappears (per MVP criteria) | ___ | [ ] |
 | 4 | Entry implementation | impossible to implement honestly (per MVP criteria) | ___ | [ ] |
 
@@ -79,25 +79,25 @@ Results must be provided for all scenarios:
 
 ```
 Step 1: Verify Data Sufficiency Checklist
-        → If any item unchecked → STOP (insufficient data)
+        -> If any item unchecked -> STOP (insufficient data)
 
 Step 2: Run all strategies against Realistic scenario
-        → Record metrics for each strategy
+        -> Record metrics for each strategy
 
 Step 3: Check GO criteria
-        → If all pass → proceed to Step 4
-        → If any fails → result = NO-GO
+        -> If all pass -> proceed to Step 4
+        -> If any fails -> result = NO-GO
 
 Step 4: Check NO-GO criteria
-        → If any triggers → result = NO-GO
-        → If none triggers → result = GO
+        -> If any triggers -> result = NO-GO
+        -> If none triggers -> result = GO
 
 Step 5: Record decision
-        → Metrics table (all values filled)
-        → Replay link (commit hash)
-        → Strategy version
-        → Scenario used
-        → Date and evaluator
+        -> Metrics table (all values filled)
+        -> Replay link (commit hash)
+        -> Strategy version
+        -> Scenario used
+        -> Date and evaluator
 ```
 
 ---
@@ -127,7 +127,62 @@ Replay Command:
 
 ---
 
+## 7. Auto-Generated Report
+
+The decision evaluation is automated via CLI:
+
+```bash
+go run cmd/report/main.go --output-dir=docs
+```
+
+This generates `DECISION_GATE_REPORT.md` with the following structure:
+
+```
+# Phase 1 Decision Gate Report
+
+Generated at: YYYY-MM-DD HH:MM:SS UTC
+
+## Strategy: [STRATEGY_ID] | [ENTRY_EVENT_TYPE]
+
+# Decision Gate Report
+
+## Decision: GO | NO-GO
+
+## GO Criteria
+
+| # | Criterion | Threshold | Actual | Pass |
+|---|-----------|-----------|--------|------|
+| 1 | Positive outcome tokens | >= 5% | X.XX% | PASS/FAIL |
+| 2 | Median outcome | > 0 | X.XXXX | PASS/FAIL |
+| 3 | Stable under degradation | ... | ... | PASS/FAIL |
+| 4 | Not dominated by outliers | P50 > 0 | X.XXXX | PASS/FAIL |
+| 5 | Entry/exit implementable | true | true/false | PASS/FAIL |
+
+GO Criteria: N/5 passed
+
+## NO-GO Triggers
+
+| # | Trigger | Condition | Actual | Status |
+|---|---------|-----------|--------|--------|
+| 1 | Low positive outcome | < 5% | X.XX% | TRIGGERED/NOT TRIGGERED |
+| 2 | Negative/zero median | <= 0 | X.XXXX | TRIGGERED/NOT TRIGGERED |
+| 3 | Edge disappears | ... | ... | TRIGGERED/NOT TRIGGERED |
+| 4 | Entry not implementable | false | true/false | TRIGGERED/NOT TRIGGERED |
+
+NO-GO Triggers: N/4 triggered
+
+## Summary
+
+[Reasons for decision]
+```
+
+The report is deterministic: same inputs produce identical outputs.
+See `docs/PIPELINE.md` for details.
+
+---
+
 ## References
-- `docs/MVP_CRITERIA.md` — authoritative thresholds
-- `docs/BRD.md` — business requirements
-- `docs/EXECUTION_SCENARIOS.md` — scenario definitions
+- `docs/MVP_CRITERIA.md` - authoritative thresholds
+- `docs/BRD.md` - business requirements
+- `docs/EXECUTION_SCENARIOS.md` - scenario definitions
+- `docs/PIPELINE.md` - pipeline architecture and determinism

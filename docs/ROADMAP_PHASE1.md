@@ -1,4 +1,4 @@
-# Roadmap — Phase 1
+# Roadmap - Phase 1
 
 ## Overview
 - **Goal:** Reproducible GO/NO-GO decision for Solana token trading edge
@@ -19,8 +19,8 @@
 **Exit Criteria:**
 | Criterion | Required | Verification |
 |-----------|----------|--------------|
-| Unique tokens discovered | ≥300 | `SELECT COUNT(DISTINCT candidate_id) FROM tokens WHERE source = 'NEW_TOKEN'` |
-| Continuous operation | ≥7 days | Uptime logs, no gaps >1 hour |
+| Unique tokens discovered | >=300 | `SELECT COUNT(DISTINCT candidate_id) FROM tokens WHERE source = 'NEW_TOKEN'` |
+| Continuous operation | >=7 days | Uptime logs, no gaps >1 hour |
 | Duplicate candidate_id | 0 | `SELECT candidate_id, COUNT(*) FROM tokens GROUP BY candidate_id HAVING COUNT(*) > 1` |
 | Fields captured | mint, pool, tx_signature, slot, timestamp | Schema validation |
 
@@ -34,7 +34,7 @@
 
 **Entry Criteria:**
 - M1 complete
-- Volume/swap baseline data available (≥24h history)
+- Volume/swap baseline data available (>=24h history)
 
 **Exit Criteria:**
 | Criterion | Required | Verification |
@@ -65,7 +65,7 @@
 | Criterion | Required | Verification |
 |-----------|----------|--------------|
 | Event types stored | swaps, liquidity_add, liquidity_remove | Schema check |
-| Operation without event loss | ≥7 days | Compare DB count vs RPC query for sample tokens |
+| Operation without event loss | >=7 days | Compare DB count vs RPC query for sample tokens |
 | Manual restarts required | 0 | Operations log |
 | Storage type | Append-only PostgreSQL | Architecture review |
 
@@ -121,7 +121,7 @@
 
 **Entry Criteria:**
 - M5 complete
-- ≥14 days of data available
+- >=14 days of data available
 
 **Exit Criteria:**
 | Criterion | Required | Verification |
@@ -175,6 +175,12 @@
 - They can reproduce results using replay link
 - No clarification needed from author
 
+**CLI:**
+```bash
+go run cmd/report/main.go --output-dir=docs
+```
+Generates `REPORT_PHASE1.md` and `STRATEGY_AGGREGATES.csv`.
+
 ---
 
 ### M9: Decision Gate Execution
@@ -195,19 +201,22 @@
 - Defend with numbers only
 - CTO can verify independently
 
+**CLI:**
+The same `cmd/report` command also generates `DECISION_GATE_REPORT.md` with GO/NO-GO evaluation per strategy.
+
 ---
 
 ## Milestone Dependencies
 
 ```
-M1 ──→ M2 ──→ M3 ──→ M4 ──→ M5 ──→ M6 ──→ M7 ──→ M8 ──→ M9
-         └─────────────────────────────────────────────────→
+M1 --> M2 --> M3 --> M4 --> M5 --> M6 --> M7 --> M8 --> M9
+         \----------------------------------------------->
                     (data collection continues in parallel)
 ```
 
 ---
 
 ## References
-- `docs/MVP_CRITERIA.md` — acceptance criteria per component
-- `docs/BRD.md` — business requirements
-- `docs/DECISION_GATE.md` — final decision process
+- `docs/MVP_CRITERIA.md` - acceptance criteria per component
+- `docs/BRD.md` - business requirements
+- `docs/DECISION_GATE.md` - final decision process
