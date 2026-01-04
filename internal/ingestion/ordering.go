@@ -98,3 +98,46 @@ func compareLiquidityEvents(a, b *domain.LiquidityEvent) int {
 	}
 	return 0
 }
+
+// SortSwapEvents orders swap events by (slot ASC, tx_signature ASC, event_index ASC).
+// This provides deterministic ordering based on blockchain order.
+func SortSwapEvents(events []*domain.SwapEvent) {
+	sort.Slice(events, func(i, j int) bool {
+		return compareSwapEvents(events[i], events[j]) < 0
+	})
+}
+
+// ValidateSwapEventOrdering checks if swap events are properly ordered.
+// Returns ErrInvalidOrdering if not.
+func ValidateSwapEventOrdering(events []*domain.SwapEvent) error {
+	for i := 1; i < len(events); i++ {
+		if compareSwapEvents(events[i-1], events[i]) >= 0 {
+			return ErrInvalidOrdering
+		}
+	}
+	return nil
+}
+
+// compareSwapEvents returns comparison result for swap events.
+// Order: (slot ASC, tx_signature ASC, event_index ASC)
+func compareSwapEvents(a, b *domain.SwapEvent) int {
+	if a.Slot != b.Slot {
+		if a.Slot < b.Slot {
+			return -1
+		}
+		return 1
+	}
+	if a.TxSignature != b.TxSignature {
+		if a.TxSignature < b.TxSignature {
+			return -1
+		}
+		return 1
+	}
+	if a.EventIndex != b.EventIndex {
+		if a.EventIndex < b.EventIndex {
+			return -1
+		}
+		return 1
+	}
+	return 0
+}

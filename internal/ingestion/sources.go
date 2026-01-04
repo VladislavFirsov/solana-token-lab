@@ -25,3 +25,10 @@ type MetadataSource interface {
 	// Fetch returns token metadata for a given mint address.
 	Fetch(ctx context.Context, mint string) (*domain.TokenMetadata, error)
 }
+
+// SwapEventSource provides raw discovery swap events from external sources.
+type SwapEventSource interface {
+	// Fetch returns swap events for a time range [from, to) (inclusive start, exclusive end).
+	// Events may be unordered; Manager enforces deterministic ordering.
+	Fetch(ctx context.Context, from, to int64) ([]*domain.SwapEvent, error)
+}

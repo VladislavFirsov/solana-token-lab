@@ -78,3 +78,33 @@ func (s *StubMetadataSource) Fetch(_ context.Context, mint string) (*domain.Toke
 	copy := *meta
 	return &copy, nil
 }
+
+// StubSwapEventSource returns fixed in-memory swap events for testing.
+// Events can be intentionally unordered to test sorting.
+// Implements ingestion.SwapEventSource interface.
+type StubSwapEventSource struct {
+	events []*domain.SwapEvent
+}
+
+// NewStubSwapEventSource creates a new stub swap event source.
+func NewStubSwapEventSource() *StubSwapEventSource {
+	return &StubSwapEventSource{events: nil}
+}
+
+// AddEvents adds swap events to the source.
+func (s *StubSwapEventSource) AddEvents(events ...*domain.SwapEvent) {
+	s.events = append(s.events, events...)
+}
+
+// Fetch returns swap events within time range [from, to) (inclusive start, exclusive end).
+// Returns copies to prevent mutation.
+func (s *StubSwapEventSource) Fetch(_ context.Context, from, to int64) ([]*domain.SwapEvent, error) {
+	var result []*domain.SwapEvent
+	for _, event := range s.events {
+		if event.Timestamp >= from && event.Timestamp < to {
+			copy := *event
+			result = append(result, &copy)
+		}
+	}
+	return result, nil
+}

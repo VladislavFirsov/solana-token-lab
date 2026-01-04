@@ -12,10 +12,12 @@ type Manager struct {
 	swapSource      SwapSource
 	liquiditySource LiquidityEventSource
 	metadataSource  MetadataSource
+	swapEventSource SwapEventSource
 
 	swapStore      storage.SwapStore
 	liquidityStore storage.LiquidityEventStore
 	metadataStore  storage.TokenMetadataStore
+	swapEventStore storage.SwapEventStore
 }
 
 // ManagerOptions contains configuration for creating a Manager.
@@ -23,10 +25,12 @@ type ManagerOptions struct {
 	SwapSource      SwapSource
 	LiquiditySource LiquidityEventSource
 	MetadataSource  MetadataSource
+	SwapEventSource SwapEventSource
 
 	SwapStore      storage.SwapStore
 	LiquidityStore storage.LiquidityEventStore
 	MetadataStore  storage.TokenMetadataStore
+	SwapEventStore storage.SwapEventStore
 }
 
 // NewManager creates a new ingestion manager with the provided sources and stores.
@@ -35,9 +39,11 @@ func NewManager(opts ManagerOptions) *Manager {
 		swapSource:      opts.SwapSource,
 		liquiditySource: opts.LiquiditySource,
 		metadataSource:  opts.MetadataSource,
+		swapEventSource: opts.SwapEventSource,
 		swapStore:       opts.SwapStore,
 		liquidityStore:  opts.LiquidityStore,
 		metadataStore:   opts.MetadataStore,
+		swapEventStore:  opts.SwapEventStore,
 	}
 }
 
@@ -119,4 +125,33 @@ func (m *Manager) IngestMetadata(ctx context.Context, candidateID, mint string) 
 
 	// Store - storage layer handles duplicates
 	return m.metadataStore.Insert(ctx, meta)
+}
+
+// IngestSwapEvents fetches discovery swap events from source and stores them.
+// Enforces deterministic ordering by (slot, tx_signature, event_index).
+// Returns count of ingested events and any error.
+// Duplicates are rejected by the storage layer (ErrDuplicateKey).
+func (m *Manager) IngestSwapEvents(ctx context.Context, from, to int64) (int, error) {
+	if m.swapEventSource == nil || m.swapEventStore == nil {
+		return 0, nil
+	}
+
+	events, err := m.swapEventSource.Fetch(ctx, from, to)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(events) == 0 {
+		return 0, nil
+	}
+
+	// Enforce deterministic ordering
+	SortSwapEvents(events)
+
+	// Store via bulk insert - storage layer handles duplicates
+	if err := m.swapEventStore.InsertBulk(ctx, events); err != nil {
+		return 0, err
+	}
+
+	return len(events), nil
 }

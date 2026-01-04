@@ -296,4 +296,157 @@ func TestManager_NilSources(t *testing.T) {
 	if err != nil {
 		t.Error("Nil metadata source should return nil")
 	}
+
+	count, err = mgr.IngestSwapEvents(ctx, 0, 1000)
+	if err != nil || count != 0 {
+		t.Error("Nil swap event source should return 0, nil")
+	}
+}
+
+// orderValidatingSwapEventStore wraps a SwapEventStore and validates ordering in InsertBulk.
+type orderValidatingSwapEventStore struct {
+	storage.SwapEventStore
+}
+
+func (s *orderValidatingSwapEventStore) InsertBulk(ctx context.Context, events []*domain.SwapEvent) error {
+	if err := ValidateSwapEventOrdering(events); err != nil {
+		return err
+	}
+	return s.SwapEventStore.InsertBulk(ctx, events)
+}
+
+func TestManager_IngestSwapEvents_Ordering(t *testing.T) {
+	// Create unordered events (slot order differs from timestamp order)
+	// Manager must sort these before InsertBulk, otherwise validating store fails
+	source := stub.NewStubSwapEventSource()
+	source.AddEvents(
+		&domain.SwapEvent{Mint: "m1", Slot: 300, TxSignature: "tx3", EventIndex: 0, Timestamp: 1000}, // slot 300, ts 1000
+		&domain.SwapEvent{Mint: "m1", Slot: 100, TxSignature: "tx1", EventIndex: 0, Timestamp: 3000}, // slot 100, ts 3000
+		&domain.SwapEvent{Mint: "m1", Slot: 200, TxSignature: "tx2", EventIndex: 0, Timestamp: 2000}, // slot 200, ts 2000
+	)
+
+	// Use validating store that returns error if InsertBulk receives unordered data
+	store := &orderValidatingSwapEventStore{SwapEventStore: memory.NewSwapEventStore()}
+
+	mgr := NewManager(ManagerOptions{
+		SwapEventSource: source,
+		SwapEventStore:  store,
+	})
+
+	ctx := context.Background()
+	count, err := mgr.IngestSwapEvents(ctx, 0, 10000)
+	if err != nil {
+		t.Fatalf("IngestSwapEvents failed: %v (Manager must sort before InsertBulk)", err)
+	}
+
+	if count != 3 {
+		t.Errorf("Expected 3 events ingested, got %d", count)
+	}
+}
+
+func TestManager_IngestSwapEvents_Duplicates(t *testing.T) {
+	source := stub.NewStubSwapEventSource()
+	source.AddEvents(
+		&domain.SwapEvent{Mint: "m1", Slot: 100, TxSignature: "tx1", EventIndex: 0, Timestamp: 1000},
+	)
+
+	store := memory.NewSwapEventStore()
+
+	mgr := NewManager(ManagerOptions{
+		SwapEventSource: source,
+		SwapEventStore:  store,
+	})
+
+	ctx := context.Background()
+
+	// First ingest succeeds
+	count, err := mgr.IngestSwapEvents(ctx, 0, 10000)
+	if err != nil {
+		t.Fatalf("First ingest failed: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("Expected 1 event, got %d", count)
+	}
+
+	// Second ingest with same data fails (duplicate)
+	_, err = mgr.IngestSwapEvents(ctx, 0, 10000)
+	if !errors.Is(err, storage.ErrDuplicateKey) {
+		t.Errorf("Expected ErrDuplicateKey on duplicate, got %v", err)
+	}
+}
+
+func TestManager_IngestSwapEvents_Deterministic(t *testing.T) {
+	// Run multiple times and verify Manager always sorts (deterministic ordering)
+	for run := 0; run < 5; run++ {
+		source := stub.NewStubSwapEventSource()
+		source.AddEvents(
+			&domain.SwapEvent{Mint: "m1", Slot: 300, TxSignature: "tx3", EventIndex: 0, Timestamp: 1000},
+			&domain.SwapEvent{Mint: "m1", Slot: 100, TxSignature: "tx1", EventIndex: 0, Timestamp: 3000},
+			&domain.SwapEvent{Mint: "m1", Slot: 200, TxSignature: "tx2", EventIndex: 0, Timestamp: 2000},
+		)
+
+		// Use validating store - if Manager doesn't sort, test fails
+		store := &orderValidatingSwapEventStore{SwapEventStore: memory.NewSwapEventStore()}
+
+		mgr := NewManager(ManagerOptions{
+			SwapEventSource: source,
+			SwapEventStore:  store,
+		})
+
+		ctx := context.Background()
+		count, err := mgr.IngestSwapEvents(ctx, 0, 10000)
+		if err != nil {
+			t.Fatalf("Run %d: IngestSwapEvents failed: %v", run, err)
+		}
+		if count != 3 {
+			t.Errorf("Run %d: Expected 3, got %d", run, count)
+		}
+	}
+}
+
+func TestManager_IngestSwapEvents_Empty(t *testing.T) {
+	source := stub.NewStubSwapEventSource()
+	store := memory.NewSwapEventStore()
+
+	mgr := NewManager(ManagerOptions{
+		SwapEventSource: source,
+		SwapEventStore:  store,
+	})
+
+	ctx := context.Background()
+	count, err := mgr.IngestSwapEvents(ctx, 0, 10000)
+	if err != nil {
+		t.Errorf("Empty source should not error: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("Expected 0 events, got %d", count)
+	}
+}
+
+func TestManager_IngestSwapEvents_TimeRangeSemantics(t *testing.T) {
+	// Test [from, to) semantics: inclusive start, exclusive end
+	source := stub.NewStubSwapEventSource()
+	source.AddEvents(
+		&domain.SwapEvent{Mint: "m1", Slot: 100, TxSignature: "tx1", EventIndex: 0, Timestamp: 1000}, // in range
+		&domain.SwapEvent{Mint: "m1", Slot: 200, TxSignature: "tx2", EventIndex: 0, Timestamp: 2000}, // in range
+		&domain.SwapEvent{Mint: "m1", Slot: 300, TxSignature: "tx3", EventIndex: 0, Timestamp: 3000}, // at end - excluded
+	)
+
+	store := memory.NewSwapEventStore()
+
+	mgr := NewManager(ManagerOptions{
+		SwapEventSource: source,
+		SwapEventStore:  store,
+	})
+
+	ctx := context.Background()
+	count, err := mgr.IngestSwapEvents(ctx, 1000, 3000)
+	if err != nil {
+		t.Fatalf("IngestSwapEvents failed: %v", err)
+	}
+
+	// Events at timestamp 1000 and 2000 included; timestamp 3000 excluded
+	if count != 2 {
+		t.Errorf("Expected 2 events (exclusive end), got %d", count)
+	}
 }
