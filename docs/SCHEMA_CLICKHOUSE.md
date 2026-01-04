@@ -79,14 +79,14 @@ Computed features for simulation and analysis.
 |--------|------|-------------|
 | candidate_id | String | Token candidate identifier |
 | timestamp_ms | UInt64 | Unix timestamp in milliseconds |
-| price_delta | Float64 | Price change from previous point |
-| price_velocity | Float64 | Rate of price change |
-| price_acceleration | Float64 | Rate of velocity change |
-| liquidity_delta | Float64 | Liquidity change from previous point |
-| liquidity_velocity | Float64 | Rate of liquidity change |
+| price_delta | Nullable(Float64) | Price change from previous point (NULL for first row) |
+| price_velocity | Nullable(Float64) | Rate of price change (NULL for first row) |
+| price_acceleration | Nullable(Float64) | Rate of velocity change (NULL for first row) |
+| liquidity_delta | Nullable(Float64) | Liquidity change from previous point (NULL for first row) |
+| liquidity_velocity | Nullable(Float64) | Rate of liquidity change (NULL for first row) |
 | token_lifetime_ms | UInt64 | Time since first swap |
-| last_swap_interval_ms | UInt64 | Time since last swap |
-| last_liq_event_interval_ms | UInt64 | Time since last liquidity event |
+| last_swap_interval_ms | Nullable(UInt64) | Time since last swap (NULL if no previous swap) |
+| last_liq_event_interval_ms | Nullable(UInt64) | Time since last liquidity event (NULL if no previous event) |
 
 **Engine:** MergeTree()
 **Order:** (candidate_id, timestamp_ms)

@@ -8,6 +8,7 @@ import (
 )
 
 // LoadFixtures populates stores with test data for Phase 1 demonstration.
+// Deprecated: Use LoadCandidatesAndTrades + Aggregator for proper missing candidate detection.
 func LoadFixtures(
 	ctx context.Context,
 	candidateStore storage.CandidateStore,
@@ -26,6 +27,27 @@ func LoadFixtures(
 
 	// Load aggregates
 	if err := loadAggregates(ctx, aggStore); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// LoadCandidatesAndTrades populates candidate and trade stores with test data.
+// Use this with Aggregator.ComputeAndStore to compute aggregates with proper
+// missing candidate detection.
+func LoadCandidatesAndTrades(
+	ctx context.Context,
+	candidateStore storage.CandidateStore,
+	tradeStore storage.TradeRecordStore,
+) error {
+	// Load candidates
+	if err := loadCandidates(ctx, candidateStore); err != nil {
+		return err
+	}
+
+	// Load trades
+	if err := loadTrades(ctx, tradeStore); err != nil {
 		return err
 	}
 
@@ -79,6 +101,7 @@ func loadTrades(ctx context.Context, store storage.TradeRecordStore) error {
 			ExitActualTime:   1704070860000,
 			ExitActualPrice:  1.08,
 			Outcome:          0.08,
+			OutcomeClass:     domain.OutcomeClassWin,
 		},
 		{
 			TradeID:          "trade_002",
@@ -94,6 +117,7 @@ func loadTrades(ctx context.Context, store storage.TradeRecordStore) error {
 			ExitActualTime:   1704157260000,
 			ExitActualPrice:  1.05,
 			Outcome:          0.05,
+			OutcomeClass:     domain.OutcomeClassWin,
 		},
 		// TIME_EXIT strategy, degraded scenario, NEW_TOKEN
 		{
@@ -110,6 +134,7 @@ func loadTrades(ctx context.Context, store storage.TradeRecordStore) error {
 			ExitActualTime:   1704070860000,
 			ExitActualPrice:  1.04,
 			Outcome:          0.04,
+			OutcomeClass:     domain.OutcomeClassWin,
 		},
 		{
 			TradeID:          "trade_004",
@@ -125,6 +150,7 @@ func loadTrades(ctx context.Context, store storage.TradeRecordStore) error {
 			ExitActualTime:   1704157260000,
 			ExitActualPrice:  1.02,
 			Outcome:          0.02,
+			OutcomeClass:     domain.OutcomeClassWin,
 		},
 		// ACTIVE_TOKEN trades
 		{
@@ -141,6 +167,7 @@ func loadTrades(ctx context.Context, store storage.TradeRecordStore) error {
 			ExitActualTime:   1704243660000,
 			ExitActualPrice:  1.03,
 			Outcome:          0.03,
+			OutcomeClass:     domain.OutcomeClassWin,
 		},
 	}
 
@@ -160,7 +187,9 @@ func loadAggregates(ctx context.Context, store storage.StrategyAggregateStore) e
 			ScenarioID:           domain.ScenarioRealistic,
 			EntryEventType:       "NEW_TOKEN",
 			TotalTrades:          100,
-			WinRate:              0.12, // 12% > 5%
+			TotalTokens:          80,
+			WinRate:              0.12,  // 12% > 5% (trade-level)
+			TokenWinRate:         0.10,  // 10% > 5% (token-level, for decision)
 			OutcomeMean:          0.065,
 			OutcomeMedian:        0.05, // > 0
 			OutcomeP10:           -0.02,
@@ -174,7 +203,9 @@ func loadAggregates(ctx context.Context, store storage.StrategyAggregateStore) e
 			ScenarioID:           domain.ScenarioDegraded,
 			EntryEventType:       "NEW_TOKEN",
 			TotalTrades:          100,
+			TotalTokens:          80,
 			WinRate:              0.08,
+			TokenWinRate:         0.06,
 			OutcomeMean:          0.04, // > 0, ratio = 0.04/0.065 = 0.62 >= 0.5
 			OutcomeMedian:        0.03,
 			OutcomeP10:           -0.03,
@@ -188,7 +219,9 @@ func loadAggregates(ctx context.Context, store storage.StrategyAggregateStore) e
 			ScenarioID:           domain.ScenarioPessimistic,
 			EntryEventType:       "NEW_TOKEN",
 			TotalTrades:          100,
+			TotalTokens:          80,
 			WinRate:              0.06,
+			TokenWinRate:         0.05,
 			OutcomeMean:          0.02,
 			OutcomeMedian:        0.01,
 			OutcomeP10:           -0.05,
@@ -202,7 +235,9 @@ func loadAggregates(ctx context.Context, store storage.StrategyAggregateStore) e
 			ScenarioID:           domain.ScenarioRealistic,
 			EntryEventType:       "ACTIVE_TOKEN",
 			TotalTrades:          50,
-			WinRate:              0.06, // 6% > 5%
+			TotalTokens:          40,
+			WinRate:              0.06, // 6% > 5% (trade-level)
+			TokenWinRate:         0.06, // 6% > 5% (token-level)
 			OutcomeMean:          0.03,
 			OutcomeMedian:        0.02,
 			OutcomeP10:           -0.04,
@@ -216,7 +251,9 @@ func loadAggregates(ctx context.Context, store storage.StrategyAggregateStore) e
 			ScenarioID:           domain.ScenarioDegraded,
 			EntryEventType:       "ACTIVE_TOKEN",
 			TotalTrades:          50,
+			TotalTokens:          40,
 			WinRate:              0.04,
+			TokenWinRate:         0.04,
 			OutcomeMean:          0.015, // ratio = 0.015/0.03 = 0.5 >= 0.5
 			OutcomeMedian:        0.01,
 			OutcomeP10:           -0.05,
@@ -228,6 +265,114 @@ func loadAggregates(ctx context.Context, store storage.StrategyAggregateStore) e
 
 	for _, a := range aggregates {
 		if err := store.Insert(ctx, a); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// LoadSwapsAndLiquidity populates swap and liquidity event stores with test data.
+// Required for sufficiency check #5 (missing events check).
+func LoadSwapsAndLiquidity(
+	ctx context.Context,
+	swapStore storage.SwapStore,
+	liquidityStore storage.LiquidityEventStore,
+) error {
+	if err := loadSwaps(ctx, swapStore); err != nil {
+		return err
+	}
+	if err := loadLiquidityEvents(ctx, liquidityStore); err != nil {
+		return err
+	}
+	return nil
+}
+
+func loadSwaps(ctx context.Context, store storage.SwapStore) error {
+	// At least one swap per candidate (cand_001, cand_002, cand_003)
+	swaps := []*domain.Swap{
+		{
+			CandidateID: "cand_001",
+			TxSignature: "swap_tx_001",
+			EventIndex:  0,
+			Slot:        100,
+			Timestamp:   1704067200000, // 2024-01-01 00:00:00 UTC
+			Side:        domain.SwapSideBuy,
+			AmountIn:    1.0,
+			AmountOut:   100.0,
+			Price:       0.01,
+		},
+		{
+			CandidateID: "cand_002",
+			TxSignature: "swap_tx_002",
+			EventIndex:  0,
+			Slot:        101,
+			Timestamp:   1704153600000, // 2024-01-02 00:00:00 UTC
+			Side:        domain.SwapSideBuy,
+			AmountIn:    2.0,
+			AmountOut:   200.0,
+			Price:       0.01,
+		},
+		{
+			CandidateID: "cand_003",
+			TxSignature: "swap_tx_003",
+			EventIndex:  0,
+			Slot:        102,
+			Timestamp:   1704240000000, // 2024-01-03 00:00:00 UTC
+			Side:        domain.SwapSideBuy,
+			AmountIn:    1.5,
+			AmountOut:   150.0,
+			Price:       0.01,
+		},
+	}
+
+	for _, s := range swaps {
+		if err := store.Insert(ctx, s); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func loadLiquidityEvents(ctx context.Context, store storage.LiquidityEventStore) error {
+	// At least one liquidity event per candidate (cand_001, cand_002, cand_003)
+	events := []*domain.LiquidityEvent{
+		{
+			CandidateID:    "cand_001",
+			TxSignature:    "liq_tx_001",
+			EventIndex:     0,
+			Slot:           100,
+			Timestamp:      1704067200000, // 2024-01-01 00:00:00 UTC
+			EventType:      domain.LiquidityEventAdd,
+			AmountToken:    10000.0,
+			AmountQuote:    100.0,
+			LiquidityAfter: 10100.0,
+		},
+		{
+			CandidateID:    "cand_002",
+			TxSignature:    "liq_tx_002",
+			EventIndex:     0,
+			Slot:           101,
+			Timestamp:      1704153600000, // 2024-01-02 00:00:00 UTC
+			EventType:      domain.LiquidityEventAdd,
+			AmountToken:    20000.0,
+			AmountQuote:    200.0,
+			LiquidityAfter: 20200.0,
+		},
+		{
+			CandidateID:    "cand_003",
+			TxSignature:    "liq_tx_003",
+			EventIndex:     0,
+			Slot:           102,
+			Timestamp:      1704240000000, // 2024-01-03 00:00:00 UTC
+			EventType:      domain.LiquidityEventAdd,
+			AmountToken:    15000.0,
+			AmountQuote:    150.0,
+			LiquidityAfter: 15150.0,
+		},
+	}
+
+	for _, e := range events {
+		if err := store.Insert(ctx, e); err != nil {
 			return err
 		}
 	}

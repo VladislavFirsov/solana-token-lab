@@ -55,14 +55,19 @@ func computeFromTrades(trades []*domain.TradeRecord, entryEventType string) *dom
 	mean := computeMean(outcomes)
 	stddev := computeStddev(outcomes, mean)
 
+	// Compute token-level win rate
+	totalTokens, tokenWinRate := computeTokenWinRate(sortedTrades)
+
 	agg := &domain.StrategyAggregate{
 		EntryEventType: entryEventType,
 
 		// Counts
-		TotalTrades: n,
-		Wins:        wins,
-		Losses:      losses,
-		WinRate:     computeWinRate(wins, n),
+		TotalTrades:  n,
+		TotalTokens:  totalTokens,
+		Wins:         wins,
+		Losses:       losses,
+		WinRate:      computeWinRate(wins, n),
+		TokenWinRate: tokenWinRate,
 
 		// Outcome Distribution
 		OutcomeMean:   mean,
@@ -81,6 +86,33 @@ func computeFromTrades(trades []*domain.TradeRecord, entryEventType string) *dom
 	}
 
 	return agg
+}
+
+// computeTokenWinRate calculates token-level win rate.
+// Groups trades by CandidateID, computes mean outcome per token,
+// returns (totalTokens, tokensWithPositiveOutcome / totalTokens).
+func computeTokenWinRate(trades []*domain.TradeRecord) (int, float64) {
+	if len(trades) == 0 {
+		return 0, 0
+	}
+
+	// Group outcomes by candidate_id
+	candidateOutcomes := make(map[string][]float64)
+	for _, t := range trades {
+		candidateOutcomes[t.CandidateID] = append(candidateOutcomes[t.CandidateID], t.Outcome)
+	}
+
+	totalTokens := len(candidateOutcomes)
+	tokensWithPositiveOutcome := 0
+
+	for _, outcomes := range candidateOutcomes {
+		meanOutcome := computeMean(outcomes)
+		if meanOutcome > 0 {
+			tokensWithPositiveOutcome++
+		}
+	}
+
+	return totalTokens, float64(tokensWithPositiveOutcome) / float64(totalTokens)
 }
 
 // computeWinRate calculates win rate as wins / total.

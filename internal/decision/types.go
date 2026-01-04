@@ -1,11 +1,27 @@
 package decision
 
+import (
+	"errors"
+
+	"solana-token-lab/internal/domain"
+)
+
+// Validation errors for DecisionInput.
+var (
+	ErrEmptyStrategyID    = errors.New("strategy_id is empty")
+	ErrEmptyScenarioID    = errors.New("scenario_id is empty")
+	ErrNotRealisticScenario = errors.New("scenario_id must be REALISTIC for decision evaluation")
+	ErrNegativeOutcomePct = errors.New("positive_outcome_pct cannot be negative")
+	ErrInvalidOutcomePct  = errors.New("positive_outcome_pct cannot exceed 100")
+)
+
 // Decision represents the final GO/NO-GO result.
 type Decision string
 
 const (
-	DecisionGO   Decision = "GO"
-	DecisionNOGO Decision = "NO-GO"
+	DecisionGO               Decision = "GO"
+	DecisionNOGO             Decision = "NO-GO"
+	DecisionInsufficientData Decision = "INSUFFICIENT_DATA"
 )
 
 // DecisionInput contains numeric metrics for decision evaluation.
@@ -32,6 +48,29 @@ type DecisionInput struct {
 	StrategyID     string
 	EntryEventType string
 	ScenarioID     string // should be realistic for decision
+}
+
+// Validate checks DecisionInput fields and returns error on invalid input.
+func (d *DecisionInput) Validate() error {
+	if d == nil {
+		return errors.New("decision input is nil")
+	}
+	if d.StrategyID == "" {
+		return ErrEmptyStrategyID
+	}
+	if d.ScenarioID == "" {
+		return ErrEmptyScenarioID
+	}
+	if d.ScenarioID != domain.ScenarioRealistic {
+		return ErrNotRealisticScenario
+	}
+	if d.PositiveOutcomePct < 0 {
+		return ErrNegativeOutcomePct
+	}
+	if d.PositiveOutcomePct > 100 {
+		return ErrInvalidOutcomePct
+	}
+	return nil
 }
 
 // CriterionResult represents pass/fail for one criterion.

@@ -12,6 +12,9 @@ type Report struct {
 	// Data Summary
 	DataSummary DataSummary
 
+	// Data Quality (sufficiency checks)
+	DataQuality DataQualitySection
+
 	// Strategy Metrics (sorted by strategy_id, scenario_id, entry_event_type)
 	StrategyMetrics []StrategyMetricRow
 
@@ -21,6 +24,21 @@ type Report struct {
 
 	// Replay References (strategy_id, scenario_id, candidate_id)
 	ReplayReferences []ReplayReferenceRow
+}
+
+// DataQualitySection contains data sufficiency checks and integrity errors.
+type DataQualitySection struct {
+	SufficiencyChecks []SufficiencyCheckRow
+	IntegrityErrors   []string
+	AllChecksPassed   bool
+}
+
+// SufficiencyCheckRow represents one sufficiency criterion.
+type SufficiencyCheckRow struct {
+	Name      string
+	Threshold string
+	Actual    string
+	Pass      bool
 }
 
 // DataSummary contains data description.
@@ -39,7 +57,9 @@ type StrategyMetricRow struct {
 	ScenarioID           string
 	EntryEventType       string
 	TotalTrades          int
-	WinRate              float64
+	TotalTokens          int
+	WinRate              float64 // trade-level
+	TokenWinRate         float64 // token-level (tokens with positive mean outcome / total tokens)
 	OutcomeMean          float64
 	OutcomeMedian        float64
 	OutcomeP10           float64

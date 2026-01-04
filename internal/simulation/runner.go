@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"solana-token-lab/internal/domain"
+	"solana-token-lab/internal/lookup"
 	"solana-token-lab/internal/storage"
 	"solana-token-lab/internal/strategy"
 )
@@ -12,7 +13,6 @@ import (
 // Runner errors
 var (
 	ErrSourceMismatch = errors.New("candidate source does not match strategy entry event type")
-	ErrNoPriceData    = errors.New("no price data available")
 )
 
 // Runner executes simulations for candidates.
@@ -74,9 +74,6 @@ func (r *Runner) Run(ctx context.Context, candidateID string, cfg domain.Strateg
 	if err != nil {
 		return nil, err
 	}
-	if len(prices) == 0 {
-		return nil, ErrNoPriceData
-	}
 
 	liquidity, err := r.liqTimeseriesStore.GetByCandidateID(ctx, candidateID)
 	if err != nil {
@@ -85,8 +82,14 @@ func (r *Runner) Run(ctx context.Context, candidateID string, cfg domain.Strateg
 
 	// 5. Compute entry signal values per REPLAY_PROTOCOL.md
 	entrySignalTime := candidate.DiscoveredAt
-	entrySignalPrice := priceAt(entrySignalTime, prices)
-	entryLiquidity := liquidityAt(entrySignalTime, liquidity)
+	entrySignalPrice, err := lookup.PriceAt(entrySignalTime, prices)
+	if err != nil {
+		return nil, err
+	}
+	entryLiquidity, err := lookup.LiquidityAt(entrySignalTime, liquidity)
+	if err != nil {
+		return nil, err
+	}
 
 	// 6. Build StrategyInput
 	input := &strategy.StrategyInput{
@@ -97,6 +100,11 @@ func (r *Runner) Run(ctx context.Context, candidateID string, cfg domain.Strateg
 		PriceTimeseries:     prices,
 		LiquidityTimeseries: liquidity,
 		Scenario:            scenario,
+	}
+
+	// 6.1 Validate input at package boundary
+	if err := input.Validate(); err != nil {
+		return nil, err
 	}
 
 	// 7. Execute strategy

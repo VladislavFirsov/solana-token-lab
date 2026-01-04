@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"solana-token-lab/internal/decision"
+	"solana-token-lab/internal/domain"
+	"solana-token-lab/internal/metrics"
 	"solana-token-lab/internal/storage/memory"
 )
 
@@ -195,5 +197,117 @@ func TestPhase1Pipeline_OutputFormat(t *testing.T) {
 	// Should contain GO decision for TIME_EXIT|NEW_TOKEN (good metrics)
 	if !strings.Contains(decisionReport, "Decision: GO") {
 		t.Error("Decision report should contain GO decision for good strategy")
+	}
+}
+
+// TestPhase1Pipeline_WithAggregator verifies that missing candidate errors
+// from the aggregator are automatically collected when WithAggregator is used.
+// This addresses Critical #2 from review.
+func TestPhase1Pipeline_WithAggregator(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+
+	// Create stores
+	candidateStore := memory.NewCandidateStore()
+	tradeStore := memory.NewTradeRecordStore()
+	aggStore := memory.NewStrategyAggregateStore()
+
+	// Insert a candidate
+	now := time.Now().UTC()
+	candidate := &domain.TokenCandidate{
+		CandidateID:  "cand_existing",
+		Source:       domain.SourceNewToken,
+		Mint:         "mint_existing",
+		TxSignature:  "tx_existing",
+		EventIndex:   0,
+		Slot:         1000,
+		DiscoveredAt: now.UnixMilli(),
+		CreatedAt:    now.UnixMilli(),
+	}
+	if err := candidateStore.Insert(ctx, candidate); err != nil {
+		t.Fatalf("Failed to insert candidate: %v", err)
+	}
+
+	// Insert trades - one with existing candidate, one with missing candidate
+	trades := []*domain.TradeRecord{
+		{
+			TradeID:         "trade_1",
+			CandidateID:     "cand_existing",
+			StrategyID:      domain.StrategyTypeTimeExit,
+			ScenarioID:      domain.ScenarioRealistic,
+			EntrySignalTime: now.UnixMilli(),
+			Outcome:         0.05,
+			OutcomeClass:    domain.OutcomeClassWin,
+		},
+		{
+			TradeID:         "trade_2",
+			CandidateID:     "cand_missing", // This candidate doesn't exist
+			StrategyID:      domain.StrategyTypeTimeExit,
+			ScenarioID:      domain.ScenarioRealistic,
+			EntrySignalTime: now.UnixMilli(),
+			Outcome:         0.03,
+			OutcomeClass:    domain.OutcomeClassWin,
+		},
+	}
+	for _, tr := range trades {
+		if err := tradeStore.Insert(ctx, tr); err != nil {
+			t.Fatalf("Failed to insert trade: %v", err)
+		}
+	}
+
+	// Create aggregator and compute aggregates (this populates MissingCandidates)
+	aggregator := metrics.NewAggregator(tradeStore, aggStore, candidateStore)
+	_, _ = aggregator.ComputeAndStore(ctx, domain.StrategyTypeTimeExit, domain.ScenarioRealistic, "NEW_TOKEN")
+
+	// Verify aggregator collected missing candidates
+	missingErrors := aggregator.GetMissingCandidateErrors()
+	if len(missingErrors) == 0 {
+		t.Error("Expected aggregator to have collected missing candidate errors")
+	}
+
+	// Insert a pre-computed aggregate so report works
+	agg := &domain.StrategyAggregate{
+		StrategyID:     domain.StrategyTypeTimeExit,
+		ScenarioID:     domain.ScenarioRealistic,
+		EntryEventType: "NEW_TOKEN",
+		TotalTrades:    1,
+		Wins:           1,
+		WinRate:        1.0,
+		OutcomeMean:    0.05,
+		OutcomeMedian:  0.05,
+	}
+	aggStore.Insert(ctx, agg)
+
+	// Create pipeline WITH aggregator
+	implementable := map[decision.StrategyKey]bool{
+		{StrategyID: domain.StrategyTypeTimeExit, EntryEventType: "NEW_TOKEN"}: true,
+	}
+	fixedTime := time.Date(2025, 1, 4, 12, 0, 0, 0, time.UTC)
+	p := NewPhase1Pipeline(
+		candidateStore,
+		tradeStore,
+		aggStore,
+		implementable,
+		tempDir,
+	).WithAggregator(aggregator).WithClock(func() time.Time { return fixedTime })
+
+	// Run pipeline
+	if err := p.Run(ctx); err != nil {
+		t.Fatalf("Pipeline run failed: %v", err)
+	}
+
+	// Read report and verify integrity errors are present
+	reportData, err := os.ReadFile(filepath.Join(tempDir, "REPORT_PHASE1.md"))
+	if err != nil {
+		t.Fatalf("Failed to read report: %v", err)
+	}
+	report := string(reportData)
+
+	// Verify missing candidate error is in report
+	if !strings.Contains(report, "missing candidate cand_missing") {
+		t.Error("Report should contain missing candidate error from aggregator")
+	}
+	if !strings.Contains(report, "### Integrity Errors") {
+		t.Error("Report should have Integrity Errors section")
 	}
 }

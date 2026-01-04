@@ -8,10 +8,12 @@ type StrategyAggregate struct {
 	EntryEventType string // NEW_TOKEN | ACTIVE_TOKEN
 
 	// Counts
-	TotalTrades int
-	Wins        int
-	Losses      int
-	WinRate     float64 // wins / total_trades
+	TotalTrades  int
+	TotalTokens  int // unique candidate_id count
+	Wins         int
+	Losses       int
+	WinRate      float64 // wins / total_trades (trade-level)
+	TokenWinRate float64 // tokens with positive mean outcome / total tokens (token-level)
 
 	// Outcome Distribution
 	OutcomeMean   float64

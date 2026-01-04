@@ -13,7 +13,12 @@ func NewEvaluator() *Evaluator {
 // Evaluate produces DecisionResult from DecisionInput.
 // GO if ALL criteria pass and NO NO-GO triggers.
 // NO-GO if ANY criterion fails or ANY trigger fires.
-func (e *Evaluator) Evaluate(input DecisionInput) *DecisionResult {
+// Returns error if input validation fails.
+func (e *Evaluator) Evaluate(input DecisionInput) (*DecisionResult, error) {
+	if err := input.Validate(); err != nil {
+		return nil, err
+	}
+
 	goCriteria := e.evaluateGOCriteria(input)
 	nogoChecks := e.evaluateNOGOTriggers(input)
 
@@ -43,7 +48,7 @@ func (e *Evaluator) Evaluate(input DecisionInput) *DecisionResult {
 		Decision:   decision,
 		GOCriteria: goCriteria,
 		NOGOChecks: nogoChecks,
-	}
+	}, nil
 }
 
 // evaluateGOCriteria evaluates the 5 GO criteria.

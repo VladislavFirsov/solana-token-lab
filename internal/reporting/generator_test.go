@@ -366,3 +366,70 @@ func TestScenarioSensitivity_Correct(t *testing.T) {
 		t.Error("ScenarioSensitivity missing TIME_EXIT + NEW_TOKEN row")
 	}
 }
+
+// TestRenderMarkdown_IntegrityErrorsWithoutSufficiencyChecks verifies that
+// integrity errors are shown even when no sufficiency checks are configured.
+// This addresses High #3 from review: data quality section was hiding errors.
+func TestRenderMarkdown_IntegrityErrorsWithoutSufficiencyChecks(t *testing.T) {
+	report := &Report{
+		GeneratedAt:   time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC),
+		StrategyCount: 1,
+		ScenarioCount: 1,
+		DataSummary: DataSummary{
+			TotalCandidates: 10,
+		},
+		DataQuality: DataQualitySection{
+			SufficiencyChecks: nil, // No sufficiency checks
+			IntegrityErrors: []string{
+				"missing candidate c1 referenced by 5 trade(s)",
+				"missing candidate c2 referenced by 3 trade(s)",
+			},
+			AllChecksPassed: false,
+		},
+	}
+
+	md := RenderMarkdown(report)
+
+	// Verify integrity errors section is present
+	if !strings.Contains(md, "### Integrity Errors") {
+		t.Error("Markdown should contain '### Integrity Errors' section even without sufficiency checks")
+	}
+
+	// Verify actual errors are listed
+	if !strings.Contains(md, "missing candidate c1 referenced by 5 trade(s)") {
+		t.Error("Markdown should contain first integrity error")
+	}
+	if !strings.Contains(md, "missing candidate c2 referenced by 3 trade(s)") {
+		t.Error("Markdown should contain second integrity error")
+	}
+
+	// Verify "No data quality checks performed" is NOT shown when there are integrity errors
+	if strings.Contains(md, "No data quality checks performed") {
+		t.Error("Markdown should not say 'No data quality checks performed' when integrity errors exist")
+	}
+}
+
+// TestRenderMarkdown_NoDataQuality verifies that "No data quality checks performed"
+// is shown only when there are no sufficiency checks AND no integrity errors.
+func TestRenderMarkdown_NoDataQuality(t *testing.T) {
+	report := &Report{
+		GeneratedAt:   time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC),
+		StrategyCount: 1,
+		ScenarioCount: 1,
+		DataSummary: DataSummary{
+			TotalCandidates: 10,
+		},
+		DataQuality: DataQualitySection{
+			SufficiencyChecks: nil,
+			IntegrityErrors:   nil,
+			AllChecksPassed:   true,
+		},
+	}
+
+	md := RenderMarkdown(report)
+
+	// Verify message is shown when no quality checks exist
+	if !strings.Contains(md, "No data quality checks performed") {
+		t.Error("Markdown should contain 'No data quality checks performed' when no checks exist")
+	}
+}

@@ -6,21 +6,21 @@ CREATE TABLE IF NOT EXISTS derived_features (
     candidate_id                String,
     timestamp_ms                UInt64,             -- Unix timestamp (ms)
 
-    -- Price derivatives
-    price_delta                 Float64,            -- price[t] - price[t-1]
-    price_velocity              Float64,            -- price_delta / time_delta (price change rate)
-    price_acceleration          Float64,            -- velocity[t] - velocity[t-1] (rate of velocity change)
+    -- Price derivatives (Nullable for first row where t-1 doesn't exist)
+    price_delta                 Nullable(Float64),  -- price[t] - price[t-1]
+    price_velocity              Nullable(Float64),  -- price_delta / time_delta (price change rate)
+    price_acceleration          Nullable(Float64),  -- velocity[t] - velocity[t-1] (rate of velocity change)
 
-    -- Liquidity derivatives
-    liquidity_delta             Float64,            -- liquidity[t] - liquidity[t-1]
-    liquidity_velocity          Float64,            -- liquidity_delta / time_delta
+    -- Liquidity derivatives (Nullable for first row)
+    liquidity_delta             Nullable(Float64),  -- liquidity[t] - liquidity[t-1]
+    liquidity_velocity          Nullable(Float64),  -- liquidity_delta / time_delta
 
     -- Token lifecycle metrics
     token_lifetime_ms           UInt64,             -- timestamp_ms - first_swap_timestamp_ms
 
-    -- Event interval metrics
-    last_swap_interval_ms       UInt64,             -- time since last swap
-    last_liq_event_interval_ms  UInt64              -- time since last liquidity event
+    -- Event interval metrics (Nullable if no previous event)
+    last_swap_interval_ms       Nullable(UInt64),   -- time since last swap
+    last_liq_event_interval_ms  Nullable(UInt64)    -- time since last liquidity event
 
 ) ENGINE = MergeTree()
 ORDER BY (candidate_id, timestamp_ms)

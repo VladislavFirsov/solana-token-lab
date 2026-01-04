@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"solana-token-lab/internal/domain"
+	"solana-token-lab/internal/lookup"
 )
 
 // TrailingStopStrategy exits when price drops from peak.
@@ -43,6 +44,11 @@ func (s *TrailingStopStrategy) ID() string {
 //   - trailing_stop = peak_price * (1 - trail_pct)
 //   - Check exits: INITIAL_STOP, TRAILING_STOP, MAX_DURATION
 func (s *TrailingStopStrategy) Execute(_ context.Context, input *StrategyInput) (*domain.TradeRecord, error) {
+	// Validate input
+	if err := input.Validate(); err != nil {
+		return nil, err
+	}
+
 	entryPrice := input.EntrySignalPrice
 	initialStop := entryPrice * (1 - s.InitialStopPct)
 	peakPrice := entryPrice
@@ -95,7 +101,11 @@ func (s *TrailingStopStrategy) Execute(_ context.Context, input *StrategyInput) 
 	// If no exit triggered, use max duration
 	if exitReason == "" {
 		exitSignalTime = maxExitTime
-		exitSignalPrice = priceAt(maxExitTime, input.PriceTimeseries)
+		price, err := lookup.PriceAt(maxExitTime, input.PriceTimeseries)
+		if err != nil {
+			return nil, err
+		}
+		exitSignalPrice = price
 		exitReason = domain.ExitReasonMaxDuration
 	}
 

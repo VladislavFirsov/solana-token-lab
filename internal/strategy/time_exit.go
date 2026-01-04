@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"solana-token-lab/internal/domain"
+	"solana-token-lab/internal/lookup"
 )
 
 // TimeExitStrategy exits after fixed hold duration.
@@ -33,11 +34,19 @@ func (s *TimeExitStrategy) ID() string {
 //   - exit_signal_price = price_at(exit_signal_time)
 //   - exit_reason = "TIME_EXIT"
 func (s *TimeExitStrategy) Execute(_ context.Context, input *StrategyInput) (*domain.TradeRecord, error) {
+	// Validate input
+	if err := input.Validate(); err != nil {
+		return nil, err
+	}
+
 	// Calculate exit signal time
 	exitSignalTime := input.EntrySignalTime + s.HoldDurationMs
 
 	// Get exit price at target time
-	exitSignalPrice := priceAt(exitSignalTime, input.PriceTimeseries)
+	exitSignalPrice, err := lookup.PriceAt(exitSignalTime, input.PriceTimeseries)
+	if err != nil {
+		return nil, err
+	}
 
 	// Build trade record
 	return buildTradeRecord(

@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"solana-token-lab/internal/domain"
+	"solana-token-lab/internal/lookup"
 )
 
 // ErrNoEntryLiquidity is returned when entry liquidity cannot be determined.
@@ -86,13 +87,22 @@ func mergePriceAndLiquidity(prices []*domain.PriceTimeseriesPoint, liq []*domain
 //   - Iterate merged events (price + liquidity) ordered by (timestamp_ms, slot)
 //   - At each event: compute liquidity_at and price_at, check exits
 func (s *LiquidityGuardStrategy) Execute(_ context.Context, input *StrategyInput) (*domain.TradeRecord, error) {
+	// Validate input
+	if err := input.Validate(); err != nil {
+		return nil, err
+	}
+
 	// Get entry liquidity
 	var entryLiquidityPtr *float64
 	if input.EntryLiquidity != nil {
 		entryLiquidityPtr = input.EntryLiquidity
 	} else {
 		// Try to get from timeseries per REPLAY_PROTOCOL.md
-		entryLiquidityPtr = liquidityAt(input.EntrySignalTime, input.LiquidityTimeseries)
+		liq, err := lookup.LiquidityAt(input.EntrySignalTime, input.LiquidityTimeseries)
+		if err != nil {
+			return nil, err
+		}
+		entryLiquidityPtr = liq
 	}
 
 	// If entry liquidity cannot be determined, return error
@@ -120,8 +130,14 @@ func (s *LiquidityGuardStrategy) Execute(_ context.Context, input *StrategyInput
 		t := event.TimestampMs
 
 		// Get current values using lookup functions
-		currentLiqPtr := liquidityAt(t, input.LiquidityTimeseries)
-		currentPrice := priceAt(t, input.PriceTimeseries)
+		currentLiqPtr, err := lookup.LiquidityAt(t, input.LiquidityTimeseries)
+		if err != nil {
+			return nil, err
+		}
+		currentPrice, err := lookup.PriceAt(t, input.PriceTimeseries)
+		if err != nil {
+			return nil, err
+		}
 
 		// Track min liquidity if available
 		if currentLiqPtr != nil && *currentLiqPtr < minLiquidity {
@@ -149,7 +165,11 @@ func (s *LiquidityGuardStrategy) Execute(_ context.Context, input *StrategyInput
 	if exitReason == "" {
 		maxExitTime := input.EntrySignalTime + s.MaxHoldDurationMs
 		exitSignalTime = maxExitTime
-		exitSignalPrice = priceAt(maxExitTime, input.PriceTimeseries)
+		price, err := lookup.PriceAt(maxExitTime, input.PriceTimeseries)
+		if err != nil {
+			return nil, err
+		}
+		exitSignalPrice = price
 		exitReason = domain.ExitReasonMaxDuration
 	}
 

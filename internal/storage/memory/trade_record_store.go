@@ -132,4 +132,22 @@ func (s *TradeRecordStore) GetByStrategyScenario(_ context.Context, strategyID, 
 	return result, nil
 }
 
+// GetAll retrieves all trades, ordered by entry_signal_time ASC.
+func (s *TradeRecordStore) GetAll(_ context.Context) ([]*domain.TradeRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make([]*domain.TradeRecord, 0, len(s.data))
+	for _, t := range s.data {
+		copy := *t
+		result = append(result, &copy)
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].EntrySignalTime < result[j].EntrySignalTime
+	})
+
+	return result, nil
+}
+
 var _ storage.TradeRecordStore = (*TradeRecordStore)(nil)

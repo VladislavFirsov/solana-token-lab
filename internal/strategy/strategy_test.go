@@ -7,6 +7,7 @@ import (
 
 	"solana-token-lab/internal/domain"
 	"solana-token-lab/internal/idhash"
+	"solana-token-lab/internal/lookup"
 )
 
 // Helper to create test price timeseries
@@ -346,23 +347,33 @@ func TestHelpers_PriceAt(t *testing.T) {
 	prices := makePriceTimeseries([]float64{1.0, 2.0, 3.0}, 1000, 1000)
 
 	// Exact match
-	if p := priceAt(2000, prices); p != 2.0 {
-		t.Errorf("expected 2.0, got %.2f", p)
+	p, err := lookup.PriceAt(2000, prices)
+	if err != nil || p != 2.0 {
+		t.Errorf("expected 2.0, got %.2f, err: %v", p, err)
 	}
 
 	// Between points - use prior
-	if p := priceAt(2500, prices); p != 2.0 {
-		t.Errorf("expected 2.0 (prior), got %.2f", p)
+	p, err = lookup.PriceAt(2500, prices)
+	if err != nil || p != 2.0 {
+		t.Errorf("expected 2.0 (prior), got %.2f, err: %v", p, err)
 	}
 
 	// Before first - use first
-	if p := priceAt(500, prices); p != 1.0 {
-		t.Errorf("expected 1.0 (first), got %.2f", p)
+	p, err = lookup.PriceAt(500, prices)
+	if err != nil || p != 1.0 {
+		t.Errorf("expected 1.0 (first), got %.2f, err: %v", p, err)
 	}
 
 	// After last - use last
-	if p := priceAt(5000, prices); p != 3.0 {
-		t.Errorf("expected 3.0 (last), got %.2f", p)
+	p, err = lookup.PriceAt(5000, prices)
+	if err != nil || p != 3.0 {
+		t.Errorf("expected 3.0 (last), got %.2f, err: %v", p, err)
+	}
+
+	// Empty slice - error
+	_, err = lookup.PriceAt(1000, nil)
+	if !errors.Is(err, lookup.ErrNoPriceData) {
+		t.Errorf("expected ErrNoPriceData, got %v", err)
 	}
 }
 
@@ -370,13 +381,21 @@ func TestHelpers_LiquidityAt(t *testing.T) {
 	liq := makeLiquidityTimeseries([]float64{100, 200, 300}, 1000, 1000)
 
 	// Exact match
-	if l := liquidityAt(2000, liq); l == nil || *l != 200 {
-		t.Errorf("expected 200, got %v", l)
+	l, err := lookup.LiquidityAt(2000, liq)
+	if err != nil || l == nil || *l != 200 {
+		t.Errorf("expected 200, got %v, err: %v", l, err)
 	}
 
-	// Before first - nil
-	if l := liquidityAt(500, liq); l != nil {
-		t.Errorf("expected nil, got %v", l)
+	// Before first - nil (valid case, not error)
+	l, err = lookup.LiquidityAt(500, liq)
+	if err != nil || l != nil {
+		t.Errorf("expected nil, got %v, err: %v", l, err)
+	}
+
+	// Empty slice - error
+	_, err = lookup.LiquidityAt(1000, nil)
+	if !errors.Is(err, lookup.ErrNoLiquidityData) {
+		t.Errorf("expected ErrNoLiquidityData, got %v", err)
 	}
 }
 
@@ -474,5 +493,61 @@ func TestLiquidityGuardStrategy_MergedEvents_MaxDuration(t *testing.T) {
 	expectedExitTime := int64(1060000) // entry + 60s
 	if result.ExitSignalTime != expectedExitTime {
 		t.Errorf("expected exit at %d, got %d", expectedExitTime, result.ExitSignalTime)
+	}
+}
+
+func TestStrategyInput_Validate(t *testing.T) {
+	validInput := &StrategyInput{
+		CandidateID:      "test-candidate",
+		EntrySignalTime:  1000000,
+		EntrySignalPrice: 1.0,
+		PriceTimeseries:  makePriceTimeseries([]float64{1.0}, 1000000, 1000),
+		Scenario:         domain.ScenarioConfigRealistic,
+	}
+
+	// Valid input
+	if err := validInput.Validate(); err != nil {
+		t.Errorf("expected nil, got %v", err)
+	}
+
+	// Nil input
+	var nilInput *StrategyInput
+	if err := nilInput.Validate(); err == nil {
+		t.Error("expected error for nil input")
+	}
+
+	// Empty candidate ID
+	input := *validInput
+	input.CandidateID = ""
+	if err := input.Validate(); !errors.Is(err, ErrEmptyCandidateID) {
+		t.Errorf("expected ErrEmptyCandidateID, got %v", err)
+	}
+
+	// Invalid signal time
+	input = *validInput
+	input.EntrySignalTime = 0
+	if err := input.Validate(); !errors.Is(err, ErrInvalidSignalTime) {
+		t.Errorf("expected ErrInvalidSignalTime, got %v", err)
+	}
+
+	// Invalid signal price
+	input = *validInput
+	input.EntrySignalPrice = 0
+	if err := input.Validate(); !errors.Is(err, ErrInvalidSignalPrice) {
+		t.Errorf("expected ErrInvalidSignalPrice, got %v", err)
+	}
+
+	// Empty price timeseries
+	input = *validInput
+	input.PriceTimeseries = nil
+	if err := input.Validate(); !errors.Is(err, ErrEmptyPriceTimeseries) {
+		t.Errorf("expected ErrEmptyPriceTimeseries, got %v", err)
+	}
+
+	// Empty scenario ID
+	input = *validInput
+	input.Scenario.ScenarioID = ""
+	if err := input.Validate(); !errors.Is(err, ErrEmptyScenarioID) {
+		t.Errorf("expected ErrEmptyScenarioID, got %v", err)
 	}
 }

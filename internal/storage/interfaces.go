@@ -130,6 +130,9 @@ type TradeRecordStore interface {
 
 	// GetByStrategyScenario retrieves all trades for a strategy/scenario combination.
 	GetByStrategyScenario(ctx context.Context, strategyID, scenarioID string) ([]*domain.TradeRecord, error)
+
+	// GetAll retrieves all trades.
+	GetAll(ctx context.Context) ([]*domain.TradeRecord, error)
 }
 
 // StrategyAggregateStore provides access to strategy_aggregates storage.

@@ -3,6 +3,8 @@ package decision
 import (
 	"strings"
 	"testing"
+
+	"solana-token-lab/internal/domain"
 )
 
 func TestEvaluate_GO(t *testing.T) {
@@ -20,10 +22,13 @@ func TestEvaluate_GO(t *testing.T) {
 		StrategyImplementable: true,
 		StrategyID:            "TIME_EXIT",
 		EntryEventType:        "NEW_TOKEN",
-		ScenarioID:            "realistic",
+		ScenarioID:            domain.ScenarioRealistic,
 	}
 
-	result := evaluator.Evaluate(input)
+	result, err := evaluator.Evaluate(input)
+	if err != nil {
+		t.Fatalf("Evaluate failed: %v", err)
+	}
 
 	if result.Decision != DecisionGO {
 		t.Errorf("Expected GO, got %s", result.Decision)
@@ -54,9 +59,14 @@ func TestEvaluate_NOGO_LowPositiveOutcome(t *testing.T) {
 		DegradedMean:          0.05,
 		OutcomeP50:            0.05,
 		StrategyImplementable: true,
+		StrategyID:            "TEST",
+		ScenarioID:            domain.ScenarioRealistic,
 	}
 
-	result := evaluator.Evaluate(input)
+	result, err := evaluator.Evaluate(input)
+	if err != nil {
+		t.Fatalf("Evaluate failed: %v", err)
+	}
 
 	if result.Decision != DecisionNOGO {
 		t.Errorf("Expected NO-GO, got %s", result.Decision)
@@ -83,9 +93,14 @@ func TestEvaluate_NOGO_NegativeMedian(t *testing.T) {
 		DegradedMean:          0.005,
 		OutcomeP50:            -0.02,
 		StrategyImplementable: true,
+		StrategyID:            "TEST",
+		ScenarioID:            domain.ScenarioRealistic,
 	}
 
-	result := evaluator.Evaluate(input)
+	result, err := evaluator.Evaluate(input)
+	if err != nil {
+		t.Fatalf("Evaluate failed: %v", err)
+	}
 
 	if result.Decision != DecisionNOGO {
 		t.Errorf("Expected NO-GO, got %s", result.Decision)
@@ -112,9 +127,14 @@ func TestEvaluate_NOGO_EdgeDisappears(t *testing.T) {
 		DegradedMean:          -0.02, // <= 0 - edge disappears
 		OutcomeP50:            0.05,
 		StrategyImplementable: true,
+		StrategyID:            "TEST",
+		ScenarioID:            domain.ScenarioRealistic,
 	}
 
-	result := evaluator.Evaluate(input)
+	result, err := evaluator.Evaluate(input)
+	if err != nil {
+		t.Fatalf("Evaluate failed: %v", err)
+	}
 
 	if result.Decision != DecisionNOGO {
 		t.Errorf("Expected NO-GO, got %s", result.Decision)
@@ -141,9 +161,14 @@ func TestEvaluate_NOGO_NotImplementable(t *testing.T) {
 		DegradedMean:          0.05,
 		OutcomeP50:            0.05,
 		StrategyImplementable: false, // not implementable - triggers NO-GO
+		StrategyID:            "TEST",
+		ScenarioID:            domain.ScenarioRealistic,
 	}
 
-	result := evaluator.Evaluate(input)
+	result, err := evaluator.Evaluate(input)
+	if err != nil {
+		t.Fatalf("Evaluate failed: %v", err)
+	}
 
 	if result.Decision != DecisionNOGO {
 		t.Errorf("Expected NO-GO, got %s", result.Decision)
@@ -174,13 +199,16 @@ func TestEvaluate_Deterministic(t *testing.T) {
 		StrategyImplementable: true,
 		StrategyID:            "TIME_EXIT",
 		EntryEventType:        "NEW_TOKEN",
-		ScenarioID:            "realistic",
+		ScenarioID:            domain.ScenarioRealistic,
 	}
 
 	// Run multiple times
 	var firstResult *DecisionResult
 	for run := 0; run < 5; run++ {
-		result := evaluator.Evaluate(input)
+		result, err := evaluator.Evaluate(input)
+		if err != nil {
+			t.Fatalf("Run %d: Evaluate failed: %v", run, err)
+		}
 
 		if firstResult == nil {
 			firstResult = result
@@ -208,6 +236,33 @@ func TestEvaluate_Deterministic(t *testing.T) {
 				t.Errorf("Run %d: NOGOChecks[%d] mismatch", run, i)
 			}
 		}
+	}
+}
+
+func TestEvaluate_ValidationError(t *testing.T) {
+	evaluator := NewEvaluator()
+
+	// Missing StrategyID
+	input := DecisionInput{
+		PositiveOutcomePct: 10.0,
+		ScenarioID:         domain.ScenarioRealistic,
+	}
+
+	_, err := evaluator.Evaluate(input)
+	if err == nil {
+		t.Error("Expected validation error for empty StrategyID")
+	}
+
+	// Non-realistic scenario
+	input = DecisionInput{
+		PositiveOutcomePct: 10.0,
+		StrategyID:         "TEST",
+		ScenarioID:         domain.ScenarioDegraded,
+	}
+
+	_, err = evaluator.Evaluate(input)
+	if err == nil {
+		t.Error("Expected validation error for non-realistic scenario")
 	}
 }
 

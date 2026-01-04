@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"solana-token-lab/internal/domain"
+	"solana-token-lab/internal/lookup"
 	"solana-token-lab/internal/storage"
 	"solana-token-lab/internal/storage/memory"
 )
@@ -183,6 +184,12 @@ func TestRunner_Run_StoresTradeRecord(t *testing.T) {
 		t.Fatalf("Insert prices failed: %v", err)
 	}
 
+	// Insert liquidity data
+	liq := makeLiquidityTimeseries(candidateID, []float64{1000, 1100, 1200}, 1000000, 30000)
+	if err := liqStore.InsertBulk(ctx, liq); err != nil {
+		t.Fatalf("Insert liquidity failed: %v", err)
+	}
+
 	runner := NewRunner(RunnerOptions{
 		CandidateStore:       candidateStore,
 		PriceTimeseriesStore: priceStore,
@@ -276,7 +283,7 @@ func TestRunner_Run_NoPriceData(t *testing.T) {
 	}
 
 	_, err := runner.Run(ctx, candidateID, cfg, domain.ScenarioConfigRealistic)
-	if !errors.Is(err, ErrNoPriceData) {
+	if !errors.Is(err, lookup.ErrNoPriceData) {
 		t.Errorf("expected ErrNoPriceData, got %v", err)
 	}
 }

@@ -3,6 +3,8 @@ package metrics
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sort"
 
 	"solana-token-lab/internal/domain"
 	"solana-token-lab/internal/storage"
@@ -16,14 +18,19 @@ type Aggregator struct {
 	tradeRecordStore storage.TradeRecordStore
 	strategyAggStore storage.StrategyAggregateStore
 	candidateStore   storage.CandidateStore
+
+	// MissingCandidates tracks trade_ids with missing candidates (for data quality reporting).
+	// Key: candidate_id, Value: count of trades referencing it.
+	MissingCandidates map[string]int
 }
 
 // NewAggregator creates a new metrics aggregator.
 func NewAggregator(tradeStore storage.TradeRecordStore, aggStore storage.StrategyAggregateStore, candidateStore storage.CandidateStore) *Aggregator {
 	return &Aggregator{
-		tradeRecordStore: tradeStore,
-		strategyAggStore: aggStore,
-		candidateStore:   candidateStore,
+		tradeRecordStore:  tradeStore,
+		strategyAggStore:  aggStore,
+		candidateStore:    candidateStore,
+		MissingCandidates: make(map[string]int),
 	}
 }
 
@@ -61,6 +68,7 @@ func (a *Aggregator) ComputeAggregate(ctx context.Context, strategyID, scenarioI
 }
 
 // filterByEntryEventType filters trades by matching candidate source to entry event type.
+// Tracks missing candidates in a.MissingCandidates instead of silently skipping.
 func (a *Aggregator) filterByEntryEventType(ctx context.Context, trades []*domain.TradeRecord, entryEventType string) ([]*domain.TradeRecord, error) {
 	var filtered []*domain.TradeRecord
 
@@ -68,7 +76,8 @@ func (a *Aggregator) filterByEntryEventType(ctx context.Context, trades []*domai
 		candidate, err := a.candidateStore.GetByID(ctx, trade.CandidateID)
 		if err != nil {
 			if errors.Is(err, storage.ErrNotFound) {
-				// Skip trades with missing candidates
+				// Record missing candidate (don't silently skip)
+				a.MissingCandidates[trade.CandidateID]++
 				continue
 			}
 			return nil, err
@@ -81,6 +90,28 @@ func (a *Aggregator) filterByEntryEventType(ctx context.Context, trades []*domai
 	}
 
 	return filtered, nil
+}
+
+// GetMissingCandidateErrors returns data quality errors for missing candidates.
+// Returns slice of error messages sorted by candidate_id for deterministic output.
+func (a *Aggregator) GetMissingCandidateErrors() []string {
+	if len(a.MissingCandidates) == 0 {
+		return nil
+	}
+
+	// Sort keys for deterministic output
+	keys := make([]string, 0, len(a.MissingCandidates))
+	for k := range a.MissingCandidates {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	errors := make([]string, len(keys))
+	for i, candidateID := range keys {
+		count := a.MissingCandidates[candidateID]
+		errors[i] = fmt.Sprintf("missing candidate %s referenced by %d trade(s)", candidateID, count)
+	}
+	return errors
 }
 
 // sourceMatchesEntryEventType checks if candidate source matches entry event type.

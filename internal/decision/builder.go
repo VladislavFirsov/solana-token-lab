@@ -35,7 +35,7 @@ var ErrStrategyNotFound = errors.New("strategy not found in report")
 
 // Build creates DecisionInput for a specific strategy from reporting.Report.
 // Uses REALISTIC scenario aggregates only.
-// PositiveOutcomePct = WinRate * 100
+// PositiveOutcomePct = TokenWinRate * 100 (token-level, not trade-level)
 // MedianOutcome = OutcomeMedian (realistic)
 // RealisticMean from realistic aggregate; DegradedMean from degraded aggregate for same strategy/entry type.
 // strategyID and entryEventType must be specified explicitly.
@@ -73,7 +73,7 @@ func (b *Builder) Build(report *reporting.Report, strategyID, entryEventType str
 
 	// Build DecisionInput
 	input := &DecisionInput{
-		PositiveOutcomePct: realisticMetric.WinRate * 100, // WinRate is 0-1, convert to percentage
+		PositiveOutcomePct: realisticMetric.TokenWinRate * 100, // TokenWinRate is 0-1, convert to percentage (token-level)
 		MedianOutcome:      realisticMetric.OutcomeMedian,
 		RealisticMean:      realisticMetric.OutcomeMean,
 		DegradedMean:       degradedMean,
@@ -88,6 +88,11 @@ func (b *Builder) Build(report *reporting.Report, strategyID, entryEventType str
 		StrategyID:     realisticMetric.StrategyID,
 		EntryEventType: realisticMetric.EntryEventType,
 		ScenarioID:     realisticMetric.ScenarioID,
+	}
+
+	// Validate before returning (fail fast)
+	if err := input.Validate(); err != nil {
+		return nil, err
 	}
 
 	return input, nil
@@ -139,7 +144,7 @@ func (b *Builder) BuildAll(report *reporting.Report) ([]*DecisionInput, error) {
 		implementable := b.implementable[k] // defaults to false if not in map
 
 		input := &DecisionInput{
-			PositiveOutcomePct:    realistic.WinRate * 100,
+			PositiveOutcomePct:    realistic.TokenWinRate * 100, // TokenWinRate is 0-1, convert to percentage (token-level)
 			MedianOutcome:         realistic.OutcomeMedian,
 			RealisticMean:         realistic.OutcomeMean,
 			DegradedMean:          degradedMean,
@@ -151,6 +156,12 @@ func (b *Builder) BuildAll(report *reporting.Report) ([]*DecisionInput, error) {
 			EntryEventType:        realistic.EntryEventType,
 			ScenarioID:            realistic.ScenarioID,
 		}
+
+		// Validate before adding (fail fast)
+		if err := input.Validate(); err != nil {
+			return nil, err
+		}
+
 		inputs = append(inputs, input)
 	}
 

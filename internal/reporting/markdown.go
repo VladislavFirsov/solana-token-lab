@@ -27,15 +27,50 @@ func RenderMarkdown(r *Report) string {
 	sb.WriteString(fmt.Sprintf("| Date Range End (ms) | %d |\n", r.DataSummary.DateRangeEnd))
 	sb.WriteString("\n")
 
+	// Data Quality
+	sb.WriteString("## Data Quality\n\n")
+	if len(r.DataQuality.SufficiencyChecks) > 0 {
+		sb.WriteString("### Sufficiency Checks\n\n")
+		sb.WriteString("| Check | Threshold | Actual | Status |\n")
+		sb.WriteString("|-------|-----------|--------|--------|\n")
+		for _, check := range r.DataQuality.SufficiencyChecks {
+			status := "FAIL"
+			if check.Pass {
+				status = "PASS"
+			}
+			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n",
+				check.Name, check.Threshold, check.Actual, status))
+		}
+		sb.WriteString("\n")
+
+		// Overall status
+		if r.DataQuality.AllChecksPassed {
+			sb.WriteString("**All checks passed.** Proceeding with GO/NO-GO evaluation.\n\n")
+		} else {
+			sb.WriteString("**Some checks failed.** Decision: INSUFFICIENT_DATA\n\n")
+		}
+	} else if len(r.DataQuality.IntegrityErrors) == 0 {
+		sb.WriteString("No data quality checks performed.\n\n")
+	}
+
+	// Integrity errors (always shown if present, even without sufficiency checks)
+	if len(r.DataQuality.IntegrityErrors) > 0 {
+		sb.WriteString("### Integrity Errors\n\n")
+		for _, err := range r.DataQuality.IntegrityErrors {
+			sb.WriteString(fmt.Sprintf("- %s\n", err))
+		}
+		sb.WriteString("\n")
+	}
+
 	// Strategy Metrics
 	sb.WriteString("## Strategy Metrics\n\n")
 	if len(r.StrategyMetrics) > 0 {
-		sb.WriteString("| Strategy | Scenario | Entry | Trades | WinRate | Mean | Median | P10 | P90 | MaxDD | MaxLoss |\n")
-		sb.WriteString("|----------|----------|-------|--------|---------|------|--------|-----|-----|-------|--------|\n")
+		sb.WriteString("| Strategy | Scenario | Entry | Trades | Tokens | WinRate | TokenWinRate | Mean | Median | P10 | P90 | MaxDD | MaxLoss |\n")
+		sb.WriteString("|----------|----------|-------|--------|--------|---------|--------------|------|--------|-----|-----|-------|--------|\n")
 		for _, m := range r.StrategyMetrics {
-			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %d | %.4f | %.4f | %.4f | %.4f | %.4f | %.4f | %d |\n",
+			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %d | %d | %.4f | %.4f | %.4f | %.4f | %.4f | %.4f | %.4f | %d |\n",
 				m.StrategyID, m.ScenarioID, m.EntryEventType,
-				m.TotalTrades, m.WinRate, m.OutcomeMean, m.OutcomeMedian,
+				m.TotalTrades, m.TotalTokens, m.WinRate, m.TokenWinRate, m.OutcomeMean, m.OutcomeMedian,
 				m.OutcomeP10, m.OutcomeP90, m.MaxDrawdown, m.MaxConsecutiveLosses))
 		}
 	} else {
