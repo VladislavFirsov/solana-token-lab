@@ -76,6 +76,10 @@ type PriceTimeseriesStore interface {
 
 	// GetByTimeRange retrieves points for a candidate within [start, end] (inclusive).
 	GetByTimeRange(ctx context.Context, candidateID string, start, end int64) ([]*domain.PriceTimeseriesPoint, error)
+
+	// GetGlobalTimeRange returns min and max timestamps across all data.
+	// Returns (0, 0, nil) if no data exists.
+	GetGlobalTimeRange(ctx context.Context) (minTs, maxTs int64, err error)
 }
 
 // LiquidityTimeseriesStore provides access to liquidity_timeseries storage.
@@ -88,6 +92,10 @@ type LiquidityTimeseriesStore interface {
 
 	// GetByTimeRange retrieves points for a candidate within [start, end] (inclusive).
 	GetByTimeRange(ctx context.Context, candidateID string, start, end int64) ([]*domain.LiquidityTimeseriesPoint, error)
+
+	// GetGlobalTimeRange returns min and max timestamps across all data.
+	// Returns (0, 0, nil) if no data exists.
+	GetGlobalTimeRange(ctx context.Context) (minTs, maxTs int64, err error)
 }
 
 // VolumeTimeseriesStore provides access to volume_timeseries storage.

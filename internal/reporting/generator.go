@@ -99,11 +99,18 @@ func (g *Generator) generateDataSummary(ctx context.Context, aggs []*domain.Stra
 		return nil, err
 	}
 
-	// Sum total trades from aggregates
-	totalTrades := 0
-	for _, agg := range aggs {
-		totalTrades += agg.TotalTrades
+	// Count distinct trades from trade store (not from aggregates to avoid double-counting)
+	// Aggregates sum trades across strategy/scenario/entry combinations which counts same trade multiple times
+	trades, err := g.tradeRecordStore.GetAll(ctx)
+	if err != nil {
+		return nil, err
 	}
+	// Count unique trade IDs
+	uniqueTradeIDs := make(map[string]struct{})
+	for _, t := range trades {
+		uniqueTradeIDs[t.TradeID] = struct{}{}
+	}
+	totalTrades := len(uniqueTradeIDs)
 
 	// Find date range from candidates
 	var dateRangeStart, dateRangeEnd int64

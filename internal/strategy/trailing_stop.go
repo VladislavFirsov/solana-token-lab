@@ -36,6 +36,11 @@ func (s *TrailingStopStrategy) ID() string {
 		s.MaxHoldDurationMs)
 }
 
+// BaseType returns the canonical base strategy type.
+func (s *TrailingStopStrategy) BaseType() string {
+	return domain.StrategyTypeTrailingStop
+}
+
 // Execute runs the strategy on price time series.
 // Per SIMULATION_SPEC.md:
 //   - initial_stop = entry_signal_price * (1 - initial_stop_pct)

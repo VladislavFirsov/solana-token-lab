@@ -18,11 +18,13 @@ func TestSufficiencyChecker_AllPass(t *testing.T) {
 	tradeStore := memory.NewTradeRecordStore()
 	swapStore := memory.NewSwapStore()
 	liquidityStore := memory.NewLiquidityEventStore()
+	priceTimeseriesStore := memory.NewPriceTimeseriesStore()
+	liqTimeseriesStore := memory.NewLiquidityTimeseriesStore()
 
-	// Create 300+ NEW_TOKEN candidates across 7+ days
+	// Create 300+ NEW_TOKEN candidates across 15+ days (for coverage check)
 	now := time.Now().UTC()
 	for i := 0; i < 350; i++ {
-		dayOffset := i % 10 // spread across 10 days
+		dayOffset := i % 16 // spread across 16 days for 14+ day coverage
 		candidate := &domain.TokenCandidate{
 			CandidateID:  "cand_" + string(rune('A'+i%26)) + string(rune('0'+i/26)),
 			Source:       domain.SourceNewToken,
@@ -68,6 +70,28 @@ func TestSufficiencyChecker_AllPass(t *testing.T) {
 		if err := liquidityStore.Insert(ctx, liquidity); err != nil {
 			t.Fatalf("Failed to insert liquidity event: %v", err)
 		}
+
+		// Add price timeseries points (primary source for coverage check)
+		pricePoint := &domain.PriceTimeseriesPoint{
+			CandidateID: candidate.CandidateID,
+			TimestampMs: candidate.DiscoveredAt,
+			Slot:        candidate.Slot,
+			Price:       0.01,
+		}
+		if err := priceTimeseriesStore.InsertBulk(ctx, []*domain.PriceTimeseriesPoint{pricePoint}); err != nil {
+			t.Fatalf("Failed to insert price timeseries: %v", err)
+		}
+
+		// Add liquidity timeseries points
+		liqPoint := &domain.LiquidityTimeseriesPoint{
+			CandidateID: candidate.CandidateID,
+			TimestampMs: candidate.DiscoveredAt,
+			Slot:        candidate.Slot,
+			Liquidity:   1010,
+		}
+		if err := liqTimeseriesStore.InsertBulk(ctx, []*domain.LiquidityTimeseriesPoint{liqPoint}); err != nil {
+			t.Fatalf("Failed to insert liquidity timeseries: %v", err)
+		}
 	}
 
 	// Create trades spanning 14+ days using domain constants
@@ -91,7 +115,8 @@ func TestSufficiencyChecker_AllPass(t *testing.T) {
 		}
 	}
 
-	checker := NewSufficiencyChecker(candidateStore, tradeStore, swapStore, liquidityStore, nil)
+	checker := NewSufficiencyChecker(candidateStore, tradeStore, swapStore, liquidityStore, nil).
+		WithTimeseriesStores(priceTimeseriesStore, liqTimeseriesStore)
 	result, err := checker.Check(ctx)
 	if err != nil {
 		t.Fatalf("Check failed: %v", err)

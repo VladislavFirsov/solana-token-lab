@@ -108,4 +108,32 @@ func (s *PriceTimeseriesStore) GetByTimeRange(_ context.Context, candidateID str
 	return result, nil
 }
 
+// GetGlobalTimeRange returns min and max timestamps across all data.
+func (s *PriceTimeseriesStore) GetGlobalTimeRange(_ context.Context) (minTs, maxTs int64, err error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if len(s.data) == 0 {
+		return 0, 0, nil
+	}
+
+	first := true
+	for _, p := range s.data {
+		if first {
+			minTs = p.TimestampMs
+			maxTs = p.TimestampMs
+			first = false
+		} else {
+			if p.TimestampMs < minTs {
+				minTs = p.TimestampMs
+			}
+			if p.TimestampMs > maxTs {
+				maxTs = p.TimestampMs
+			}
+		}
+	}
+
+	return minTs, maxTs, nil
+}
+
 var _ storage.PriceTimeseriesStore = (*PriceTimeseriesStore)(nil)

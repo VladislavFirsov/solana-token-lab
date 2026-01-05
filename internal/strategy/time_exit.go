@@ -28,6 +28,11 @@ func (s *TimeExitStrategy) ID() string {
 	return fmt.Sprintf("TIME_EXIT_%s_%dms", s.EntryEventType, s.HoldDurationMs)
 }
 
+// BaseType returns the canonical base strategy type.
+func (s *TimeExitStrategy) BaseType() string {
+	return domain.StrategyTypeTimeExit
+}
+
 // Execute runs the strategy on price time series.
 // Per SIMULATION_SPEC.md:
 //   - exit_signal_time = entry_signal_time + hold_duration_ms

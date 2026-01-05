@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"solana-token-lab/internal/decision"
@@ -25,6 +27,7 @@ func main() {
 	postgresDSN := flag.String("postgres-dsn", "", "PostgreSQL connection string (e.g., postgres://user:pass@host:5432/db)")
 	clickhouseDSN := flag.String("clickhouse-dsn", "", "ClickHouse connection string (e.g., clickhouse://user:pass@host:9000/db)")
 	useFixtures := flag.Bool("use-fixtures", false, "Use in-memory fixtures instead of database")
+	expectedDataVersion := flag.String("data-version", "", "Expected data version hash (validates data integrity if provided)")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -69,11 +72,11 @@ func main() {
 	// TIME_EXIT is implementable (simple time-based exit)
 	// TRAILING_STOP and LIQUIDITY_GUARD require real-time price/liquidity feeds - not yet implementable
 	implementable := map[decision.StrategyKey]bool{
-		{StrategyID: "TIME_EXIT", EntryEventType: "NEW_TOKEN"}:         true,
-		{StrategyID: "TIME_EXIT", EntryEventType: "ACTIVE_TOKEN"}:      true,
-		{StrategyID: "TRAILING_STOP", EntryEventType: "NEW_TOKEN"}:     false,
-		{StrategyID: "TRAILING_STOP", EntryEventType: "ACTIVE_TOKEN"}:  false,
-		{StrategyID: "LIQUIDITY_GUARD", EntryEventType: "NEW_TOKEN"}:   false,
+		{StrategyID: "TIME_EXIT", EntryEventType: "NEW_TOKEN"}:          true,
+		{StrategyID: "TIME_EXIT", EntryEventType: "ACTIVE_TOKEN"}:       true,
+		{StrategyID: "TRAILING_STOP", EntryEventType: "NEW_TOKEN"}:      false,
+		{StrategyID: "TRAILING_STOP", EntryEventType: "ACTIVE_TOKEN"}:   false,
+		{StrategyID: "LIQUIDITY_GUARD", EntryEventType: "NEW_TOKEN"}:    false,
 		{StrategyID: "LIQUIDITY_GUARD", EntryEventType: "ACTIVE_TOKEN"}: false,
 	}
 
@@ -108,6 +111,24 @@ func main() {
 	if err := p.Run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running pipeline: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Validate data version if provided (for reproducibility verification)
+	if *expectedDataVersion != "" {
+		actualDataVersion, err := readDataVersionFromMetadata(*outputDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading data version: %v\n", err)
+			os.Exit(1)
+		}
+		if actualDataVersion != *expectedDataVersion {
+			fmt.Fprintf(os.Stderr, "ERROR: Data version mismatch!\n")
+			fmt.Fprintf(os.Stderr, "  Expected: %s\n", *expectedDataVersion)
+			fmt.Fprintf(os.Stderr, "  Actual:   %s\n", actualDataVersion)
+			fmt.Fprintf(os.Stderr, "\nThis indicates the underlying data has changed since the original report.\n")
+			fmt.Fprintf(os.Stderr, "Reproducibility requirement violated.\n")
+			os.Exit(2)
+		}
+		fmt.Printf("Data version validated: %s\n", actualDataVersion)
 	}
 
 	fmt.Println("Phase 1 report generated successfully:")
@@ -222,4 +243,26 @@ func computeAllAggregates(ctx context.Context, agg *metrics.Aggregator) error {
 		}
 	}
 	return nil
+}
+
+// readDataVersionFromMetadata reads the data_version from metadata.json.
+func readDataVersionFromMetadata(outputDir string) (string, error) {
+	metadataPath := filepath.Join(outputDir, "metadata.json")
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		return "", fmt.Errorf("read metadata.json: %w", err)
+	}
+
+	var metadata struct {
+		DataVersion string `json:"data_version"`
+	}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return "", fmt.Errorf("parse metadata.json: %w", err)
+	}
+
+	if metadata.DataVersion == "" {
+		return "", fmt.Errorf("data_version not found in metadata.json")
+	}
+
+	return metadata.DataVersion, nil
 }

@@ -89,21 +89,13 @@ func (e *Evaluator) evaluateGOCriteria(input DecisionInput) []CriterionResult {
 		Pass:      stabilityPass,
 	}
 
-	// 4. Not dominated by outliers: check that P25 > 0 OR (P75 - P25) / median < 3.0
-	// This verifies the distribution isn't driven by extreme tail values
-	outlierPass := false
-	var outlierActual string
-	if input.OutcomeP50 != 0 {
-		iqrRatio := (input.OutcomeP75 - input.OutcomeP25) / input.OutcomeP50
-		outlierPass = input.OutcomeP25 > 0 || iqrRatio < 3.0
-		outlierActual = fmt.Sprintf("P25=%.4f, IQR/median=%.2f", input.OutcomeP25, iqrRatio)
-	} else {
-		outlierPass = input.OutcomeP25 > 0
-		outlierActual = fmt.Sprintf("P25=%.4f, P50=0 (undefined ratio)", input.OutcomeP25)
-	}
+	// 4. Not dominated by outliers: check that P25 > 0
+	// Per DECISION_GATE.md: only P25 > 0 is specified (no IQR threshold)
+	outlierPass := input.OutcomeP25 > 0
+	outlierActual := fmt.Sprintf("P25=%.4f", input.OutcomeP25)
 	criteria[3] = CriterionResult{
 		Name:      "Not dominated by outliers",
-		Threshold: "P25 > 0 OR IQR/median < 3.0",
+		Threshold: "P25 > 0",
 		Actual:    outlierActual,
 		Pass:      outlierPass,
 	}

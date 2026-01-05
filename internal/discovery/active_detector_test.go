@@ -350,3 +350,156 @@ func TestActiveDetector_TriggeringSwap(t *testing.T) {
 		t.Errorf("Expected pool 'Pool123', got %v", c.Pool)
 	}
 }
+
+func TestActiveDetector_LessThan1HourHistory_Skipped(t *testing.T) {
+	swapEventStore := memory.NewSwapEventStore()
+	candidateStore := memory.NewCandidateStore()
+	ctx := context.Background()
+
+	// Evaluation time at 2 hours from epoch
+	evalTime := int64(2 * 3600000)
+
+	// Add swaps only in the last 30 minutes (less than 1 hour history)
+	// Even with high volume, should be skipped because not enough history
+	for i := 0; i < 10; i++ {
+		ts := evalTime - int64((30-i)*60000) // 30 to 21 minutes before eval
+		_ = swapEventStore.Insert(ctx, &domain.SwapEvent{
+			Mint:        "MintShortHistory",
+			TxSignature: "tx" + string(rune('a'+i)),
+			EventIndex:  0,
+			Slot:        int64(100 + i),
+			Timestamp:   ts,
+			AmountOut:   100.0, // high volume
+		})
+	}
+
+	config := DefaultActiveConfig()
+	detector := NewActiveDetector(config, swapEventStore, candidateStore)
+
+	candidates, err := detector.DetectAt(ctx, evalTime)
+	if err != nil {
+		t.Fatalf("DetectAt failed: %v", err)
+	}
+
+	// Should be skipped due to <1h history
+	if len(candidates) != 0 {
+		t.Errorf("Expected 0 candidates (<1h history skipped), got %d", len(candidates))
+	}
+}
+
+func TestActiveDetector_PartialHistory_NormalizedCorrectly(t *testing.T) {
+	swapEventStore := memory.NewSwapEventStore()
+	candidateStore := memory.NewCandidateStore()
+	ctx := context.Background()
+
+	// Token with only 2 hours of history (not full 24h)
+	// Should normalize by 2 hours, not 24 hours
+	evalTime := int64(3 * 3600000) // 3 hours from epoch
+
+	// Add background volume: 1 hour ago = 10 volume
+	// This will be the first swap, so actualHistory = evalTime - firstSwapTime = 2 hours
+	_ = swapEventStore.Insert(ctx, &domain.SwapEvent{
+		Mint:        "MintPartialHistory",
+		TxSignature: "txEarly",
+		EventIndex:  0,
+		Slot:        100,
+		Timestamp:   evalTime - 2*3600000, // 2 hours ago
+		AmountOut:   10.0,
+	})
+
+	// Add low volume 1.5 hours ago
+	_ = swapEventStore.Insert(ctx, &domain.SwapEvent{
+		Mint:        "MintPartialHistory",
+		TxSignature: "txMiddle",
+		EventIndex:  0,
+		Slot:        101,
+		Timestamp:   evalTime - int64(1.5*3600000),
+		AmountOut:   5.0,
+	})
+
+	// Add spike volume in last hour: 100 volume
+	// Total volume = 10 + 5 + 100 = 115
+	// actualHours = 2 hours
+	// volume24hAvg = 115 / 2 = 57.5 per hour
+	// volume1h = 100
+	// Spike requires: volume1h > 3.0 * volume24hAvg = 172.5
+	// So 100 is NOT a spike with correct normalization
+
+	_ = swapEventStore.Insert(ctx, &domain.SwapEvent{
+		Mint:        "MintPartialHistory",
+		TxSignature: "txSpike",
+		EventIndex:  0,
+		Slot:        102,
+		Timestamp:   evalTime - 500, // just before eval
+		AmountOut:   100.0,
+	})
+
+	config := DefaultActiveConfig()
+	detector := NewActiveDetector(config, swapEventStore, candidateStore)
+
+	candidates, err := detector.DetectAt(ctx, evalTime)
+	if err != nil {
+		t.Fatalf("DetectAt failed: %v", err)
+	}
+
+	// With correct normalization by 2 hours (not 24h), no spike detected
+	// If incorrectly normalized by 24h: volume24hAvg = 115/24 = 4.79, spike = 100 > 14.4 = TRUE (wrong)
+	if len(candidates) != 0 {
+		t.Errorf("Expected 0 candidates (correct normalization prevents false spike), got %d", len(candidates))
+	}
+}
+
+func TestActiveDetector_PartialHistory_TrueSpike(t *testing.T) {
+	swapEventStore := memory.NewSwapEventStore()
+	candidateStore := memory.NewCandidateStore()
+	ctx := context.Background()
+
+	// Token with only 4 hours of history (not full 24h)
+	// Should detect true spike with correct normalization
+	evalTime := int64(5 * 3600000) // 5 hours from epoch
+
+	// Add background volume over 4 hours: 10 volume per hour
+	for i := 0; i < 4; i++ {
+		_ = swapEventStore.Insert(ctx, &domain.SwapEvent{
+			Mint:        "MintTrueSpike",
+			TxSignature: "tx" + string(rune('a'+i)),
+			EventIndex:  0,
+			Slot:        int64(100 + i),
+			Timestamp:   evalTime - int64((4-i)*3600000), // 4, 3, 2, 1 hours ago
+			AmountOut:   10.0,
+		})
+	}
+
+	// Add massive spike in last hour: 200 volume
+	// Total volume = 40 + 200 = 240
+	// actualHours = 4 hours
+	// volume24hAvg = 240 / 4 = 60 per hour
+	// volume1h = 200
+	// Spike requires: volume1h > 3.0 * volume24hAvg = 180
+	// 200 > 180 = TRUE spike
+	_ = swapEventStore.Insert(ctx, &domain.SwapEvent{
+		Mint:        "MintTrueSpike",
+		TxSignature: "txSpike",
+		EventIndex:  0,
+		Slot:        200,
+		Timestamp:   evalTime - 500,
+		AmountOut:   200.0,
+	})
+
+	config := DefaultActiveConfig()
+	detector := NewActiveDetector(config, swapEventStore, candidateStore)
+
+	candidates, err := detector.DetectAt(ctx, evalTime)
+	if err != nil {
+		t.Fatalf("DetectAt failed: %v", err)
+	}
+
+	// True spike detected with partial history normalization
+	if len(candidates) != 1 {
+		t.Fatalf("Expected 1 candidate (true spike with partial history), got %d", len(candidates))
+	}
+
+	if candidates[0].Source != domain.SourceActiveToken {
+		t.Errorf("Expected source ACTIVE_TOKEN, got %s", candidates[0].Source)
+	}
+}

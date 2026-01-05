@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -41,6 +42,10 @@ type Phase1Pipeline struct {
 	dataSource         string   // "fixtures" or "db" for replay command
 	postgresDSN        string   // for DB mode replay command
 	clickhouseDSN      string   // for DB mode replay command
+	// Raw data stores for DataVersion hash (per REPORTING_SPEC)
+	candidateStoreForHash    storage.CandidateStore
+	priceTimeseriesStoreHash storage.PriceTimeseriesStore
+	liqTimeseriesStoreHash   storage.LiquidityTimeseriesStore
 }
 
 // NewPhase1Pipeline creates a new pipeline.
@@ -111,6 +116,19 @@ func (p *Phase1Pipeline) WithDBSource(postgresDSN, clickhouseDSN string) *Phase1
 	return p
 }
 
+// WithRawDataStores sets raw data stores for DataVersion computation per REPORTING_SPEC.
+// DataVersion = SHA256(SHA256(price_timeseries) || SHA256(liquidity_timeseries) || SHA256(candidates))
+func (p *Phase1Pipeline) WithRawDataStores(
+	candidateStore storage.CandidateStore,
+	priceStore storage.PriceTimeseriesStore,
+	liqStore storage.LiquidityTimeseriesStore,
+) *Phase1Pipeline {
+	p.candidateStoreForHash = candidateStore
+	p.priceTimeseriesStoreHash = priceStore
+	p.liqTimeseriesStoreHash = liqStore
+	return p
+}
+
 // Run executes full pipeline and writes output files:
 // - REPORT_PHASE1.md
 // - strategy_aggregates.csv
@@ -165,7 +183,7 @@ func (p *Phase1Pipeline) Run(ctx context.Context) error {
 	p.populateExecutiveSummary(report)
 
 	// 5. Populate Reproducibility metadata (needs trades for DataVersion)
-	p.populateReproducibility(report, trades)
+	p.populateReproducibility(ctx, report, trades)
 
 	// 6. Set decision checklist reference
 	report.DecisionChecklistRef = "docs/DECISION_CHECKLIST.md"
@@ -252,6 +270,21 @@ func (p *Phase1Pipeline) Run(ctx context.Context) error {
 		return err
 	}
 
+	// Write additional artifacts per REPORTING_SPEC
+	if err := p.writeReportJSON(report); err != nil {
+		return err
+	}
+	if err := p.writeMetadata(report); err != nil {
+		return err
+	}
+	if err := p.writeMetricsQueries(); err != nil {
+		return err
+	}
+	// writeChecksums must be last as it computes hashes of all other files
+	if err := p.writeChecksums(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -306,11 +339,11 @@ func (p *Phase1Pipeline) populateExecutiveSummary(report *reporting.Report) {
 }
 
 // populateReproducibility fills in reproducibility metadata.
-func (p *Phase1Pipeline) populateReproducibility(report *reporting.Report, trades []*domain.TradeRecord) {
+func (p *Phase1Pipeline) populateReproducibility(ctx context.Context, report *reporting.Report, trades []*domain.TradeRecord) {
 	report.Reproducibility = reporting.ReproducibilityMetadata{
 		ReportTimestamp:  p.clock(),
 		GeneratorVersion: GeneratorVersion,
-		DataVersion:      p.computeDataVersion(report, trades),
+		DataVersion:      p.computeDataVersion(ctx, report, trades),
 		StrategyVersion:  StrategyVersion,
 		ReplayCommitHash: getGitCommitHash(),
 		ReplayCommand:    p.buildReplayCommand(),
@@ -332,9 +365,176 @@ func (p *Phase1Pipeline) buildReplayCommand() string {
 	}
 }
 
-// computeDataVersion computes SHA256 hash of report data for reproducibility.
-// Hash includes strategy metrics AND individual trade records to detect any data changes.
-func (p *Phase1Pipeline) computeDataVersion(report *reporting.Report, trades []*domain.TradeRecord) string {
+// computeDataVersion computes SHA256 hash per REPORTING_SPEC section 3.2:
+// data_version = SHA256(SHA256(price_timeseries) || SHA256(liquidity_timeseries) || SHA256(candidates))
+// Falls back to trades-based hash if raw data stores not configured.
+func (p *Phase1Pipeline) computeDataVersion(ctx context.Context, report *reporting.Report, trades []*domain.TradeRecord) string {
+	// Use raw data stores if configured (per spec)
+	if p.candidateStoreForHash != nil && p.priceTimeseriesStoreHash != nil && p.liqTimeseriesStoreHash != nil {
+		return p.computeDataVersionFromRaw(ctx)
+	}
+	// Fallback: use trades-based hash
+	return p.computeDataVersionFromTrades(report, trades)
+}
+
+// computeDataVersionFromRaw computes hash from raw data per REPORTING_SPEC.
+// Logs warnings for any errors encountered during hashing (does not fail).
+func (p *Phase1Pipeline) computeDataVersionFromRaw(ctx context.Context) string {
+	// Hash candidates
+	candidatesHash, candidatesErr := p.hashCandidates(ctx)
+	if candidatesErr != nil {
+		// Log warning but continue - partial hash is better than no hash
+		fmt.Fprintf(os.Stderr, "WARNING: error hashing candidates: %v\n", candidatesErr)
+	}
+
+	// Hash price timeseries
+	priceHash, priceErr := p.hashPriceTimeseries(ctx)
+	if priceErr != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: error hashing price timeseries: %v\n", priceErr)
+	}
+
+	// Hash liquidity timeseries
+	liqHash, liqErr := p.hashLiquidityTimeseries(ctx)
+	if liqErr != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: error hashing liquidity timeseries: %v\n", liqErr)
+	}
+
+	// Combine: SHA256(priceHash || liqHash || candidatesHash)
+	h := sha256.New()
+	h.Write(priceHash)
+	h.Write(liqHash)
+	h.Write(candidatesHash)
+
+	// Full SHA256 hash per REPORTING_SPEC.md section 3.1
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// hashCandidates returns SHA256 of all candidates (sorted by candidate_id).
+// Per DISCOVERY_SPEC.md: includes pool in hash as it's part of candidate_id discriminator.
+// Returns error if database queries fail.
+func (p *Phase1Pipeline) hashCandidates(ctx context.Context) ([]byte, error) {
+	h := sha256.New()
+
+	// Get all candidates with error handling
+	newTokens, err := p.candidateStoreForHash.GetBySource(ctx, domain.SourceNewToken)
+	if err != nil {
+		return h.Sum(nil), fmt.Errorf("get NEW_TOKEN candidates: %w", err)
+	}
+	activeTokens, err := p.candidateStoreForHash.GetBySource(ctx, domain.SourceActiveToken)
+	if err != nil {
+		return h.Sum(nil), fmt.Errorf("get ACTIVE_TOKEN candidates: %w", err)
+	}
+	all := append(newTokens, activeTokens...)
+
+	// Sort by candidate_id for determinism
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].CandidateID < all[j].CandidateID
+	})
+
+	// Hash each candidate (including pool per DISCOVERY_SPEC.md)
+	for _, c := range all {
+		pool := ""
+		if c.Pool != nil {
+			pool = *c.Pool
+		}
+		line := fmt.Sprintf("%s|%s|%s|%s|%s|%d|%d|%d\n",
+			c.CandidateID, c.Source, c.Mint, pool, c.TxSignature,
+			c.EventIndex, c.Slot, c.DiscoveredAt)
+		h.Write([]byte(line))
+	}
+
+	return h.Sum(nil), nil
+}
+
+// hashPriceTimeseries returns SHA256 of all price timeseries points.
+// Uses GetGlobalTimeRange + GetByTimeRange for efficiency.
+// Returns error if database queries fail.
+func (p *Phase1Pipeline) hashPriceTimeseries(ctx context.Context) ([]byte, error) {
+	h := sha256.New()
+	var firstErr error
+
+	// Get all candidates to iterate their price data
+	newTokens, err := p.candidateStoreForHash.GetBySource(ctx, domain.SourceNewToken)
+	if err != nil {
+		return h.Sum(nil), fmt.Errorf("get NEW_TOKEN candidates: %w", err)
+	}
+	activeTokens, err := p.candidateStoreForHash.GetBySource(ctx, domain.SourceActiveToken)
+	if err != nil {
+		return h.Sum(nil), fmt.Errorf("get ACTIVE_TOKEN candidates: %w", err)
+	}
+	all := append(newTokens, activeTokens...)
+
+	// Sort candidates for determinism
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].CandidateID < all[j].CandidateID
+	})
+
+	// Hash price points for each candidate
+	for _, c := range all {
+		points, err := p.priceTimeseriesStoreHash.GetByCandidateID(ctx, c.CandidateID)
+		if err != nil {
+			// Capture first error but continue to hash remaining candidates
+			if firstErr == nil {
+				firstErr = fmt.Errorf("get price timeseries for %s: %w", c.CandidateID, err)
+			}
+			continue
+		}
+		for _, pt := range points {
+			line := fmt.Sprintf("%s|%d|%d|%.8f|%.8f|%d\n",
+				pt.CandidateID, pt.TimestampMs, pt.Slot,
+				pt.Price, pt.Volume, pt.SwapCount)
+			h.Write([]byte(line))
+		}
+	}
+
+	return h.Sum(nil), firstErr
+}
+
+// hashLiquidityTimeseries returns SHA256 of all liquidity timeseries points.
+// Returns error if database queries fail.
+func (p *Phase1Pipeline) hashLiquidityTimeseries(ctx context.Context) ([]byte, error) {
+	h := sha256.New()
+	var firstErr error
+
+	// Get all candidates to iterate their liquidity data
+	newTokens, err := p.candidateStoreForHash.GetBySource(ctx, domain.SourceNewToken)
+	if err != nil {
+		return h.Sum(nil), fmt.Errorf("get NEW_TOKEN candidates: %w", err)
+	}
+	activeTokens, err := p.candidateStoreForHash.GetBySource(ctx, domain.SourceActiveToken)
+	if err != nil {
+		return h.Sum(nil), fmt.Errorf("get ACTIVE_TOKEN candidates: %w", err)
+	}
+	all := append(newTokens, activeTokens...)
+
+	// Sort candidates for determinism
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].CandidateID < all[j].CandidateID
+	})
+
+	// Hash liquidity points for each candidate
+	for _, c := range all {
+		points, err := p.liqTimeseriesStoreHash.GetByCandidateID(ctx, c.CandidateID)
+		if err != nil {
+			// Capture first error but continue to hash remaining candidates
+			if firstErr == nil {
+				firstErr = fmt.Errorf("get liquidity timeseries for %s: %w", c.CandidateID, err)
+			}
+			continue
+		}
+		for _, pt := range points {
+			line := fmt.Sprintf("%s|%d|%d|%.8f|%.8f|%.8f\n",
+				pt.CandidateID, pt.TimestampMs, pt.Slot,
+				pt.Liquidity, pt.LiquidityToken, pt.LiquidityQuote)
+			h.Write([]byte(line))
+		}
+	}
+
+	return h.Sum(nil), firstErr
+}
+
+// computeDataVersionFromTrades is fallback when raw stores not configured.
+func (p *Phase1Pipeline) computeDataVersionFromTrades(report *reporting.Report, trades []*domain.TradeRecord) string {
 	h := sha256.New()
 
 	// Part 1: Strategy metrics (aggregated data)
@@ -359,7 +559,8 @@ func (p *Phase1Pipeline) computeDataVersion(report *reporting.Report, trades []*
 	h.Write([]byte("\nTRADES\n"))
 	h.Write([]byte(strings.Join(tradeParts, "\n")))
 
-	return hex.EncodeToString(h.Sum(nil))[:12] // short hash
+	// Full SHA256 hash per REPORTING_SPEC.md section 3.1
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // getGitCommitHash returns current git commit hash or "unknown" if not in git repo.
@@ -498,4 +699,113 @@ func (p *Phase1Pipeline) renderDecisionReportWithDecision(inputs []*decision.Dec
 		bestMedian)
 
 	return content, overallDecision, nil
+}
+
+// writeReportJSON writes report.json with full machine-readable report per REPORTING_SPEC.
+func (p *Phase1Pipeline) writeReportJSON(report *reporting.Report) error {
+	data, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal report: %w", err)
+	}
+	path := filepath.Join(p.outputDir, "report.json")
+	return os.WriteFile(path, data, 0644)
+}
+
+// writeMetadata writes metadata.json with report metadata per REPORTING_SPEC.
+func (p *Phase1Pipeline) writeMetadata(report *reporting.Report) error {
+	metadata := map[string]interface{}{
+		"report_timestamp":   report.Reproducibility.ReportTimestamp.Format(time.RFC3339),
+		"generator_version":  report.Reproducibility.GeneratorVersion,
+		"data_version":       report.Reproducibility.DataVersion,
+		"strategy_version":   report.Reproducibility.StrategyVersion,
+		"replay_commit_hash": report.Reproducibility.ReplayCommitHash,
+		"replay_command":     report.Reproducibility.ReplayCommand,
+		"strategy_count":     report.StrategyCount,
+		"scenario_count":     report.ScenarioCount,
+		"decision":           report.ExecutiveSummary.Decision,
+	}
+
+	data, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal metadata: %w", err)
+	}
+
+	path := filepath.Join(p.outputDir, "metadata.json")
+	return os.WriteFile(path, data, 0644)
+}
+
+// writeChecksums writes checksums.sha256 for all output files per REPORTING_SPEC.
+func (p *Phase1Pipeline) writeChecksums() error {
+	files := []string{
+		"REPORT_PHASE1.md",
+		"DECISION_GATE_REPORT.md",
+		"report.json",
+		"strategy_aggregates.csv",
+		"trade_records.csv",
+		"scenario_outcomes.csv",
+		"metadata.json",
+		"metrics_queries.sql",
+	}
+
+	var checksums []string
+	for _, file := range files {
+		path := filepath.Join(p.outputDir, file)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			// Skip files that don't exist (e.g., if INSUFFICIENT_DATA decision)
+			continue
+		}
+		hash := sha256.Sum256(data)
+		checksums = append(checksums, fmt.Sprintf("%s  %s", hex.EncodeToString(hash[:]), file))
+	}
+
+	content := strings.Join(checksums, "\n") + "\n"
+	path := filepath.Join(p.outputDir, "checksums.sha256")
+	return os.WriteFile(path, []byte(content), 0644)
+}
+
+// writeMetricsQueries writes metrics_queries.sql with SQL templates per REPORTING_SPEC.
+func (p *Phase1Pipeline) writeMetricsQueries() error {
+	queries := `-- Metrics Queries for Phase 1 Report
+-- Generated by Phase1Pipeline
+
+-- Strategy aggregates by scenario
+SELECT
+    strategy_id,
+    scenario_id,
+    entry_event_type,
+    total_trades,
+    win_rate,
+    outcome_median,
+    outcome_p25,
+    outcome_p75
+FROM strategy_aggregates
+ORDER BY strategy_id, scenario_id, entry_event_type;
+
+-- Top performing strategies (Realistic scenario)
+SELECT
+    strategy_id,
+    entry_event_type,
+    win_rate,
+    outcome_median,
+    max_drawdown
+FROM strategy_aggregates
+WHERE scenario_id = 'Realistic'
+ORDER BY outcome_median DESC
+LIMIT 10;
+
+-- Scenario sensitivity comparison
+SELECT
+    a.strategy_id,
+    a.entry_event_type,
+    a.outcome_median AS realistic_median,
+    b.outcome_median AS pessimistic_median,
+    (a.outcome_median - b.outcome_median) / a.outcome_median * 100 AS degradation_pct
+FROM strategy_aggregates a
+JOIN strategy_aggregates b ON a.strategy_id = b.strategy_id
+    AND a.entry_event_type = b.entry_event_type
+WHERE a.scenario_id = 'Realistic' AND b.scenario_id = 'Pessimistic';
+`
+	path := filepath.Join(p.outputDir, "metrics_queries.sql")
+	return os.WriteFile(path, []byte(queries), 0644)
 }

@@ -129,6 +129,22 @@ func (s *PriceTimeseriesStore) exists(ctx context.Context, candidateID string, t
 	return count > 0, nil
 }
 
+// GetGlobalTimeRange returns min and max timestamps across all data.
+func (s *PriceTimeseriesStore) GetGlobalTimeRange(ctx context.Context) (minTs, maxTs int64, err error) {
+	query := `
+		SELECT min(timestamp_ms), max(timestamp_ms)
+		FROM price_timeseries
+	`
+
+	var minVal, maxVal uint64
+	err = s.conn.QueryRow(ctx, query).Scan(&minVal, &maxVal)
+	if err != nil {
+		return 0, 0, fmt.Errorf("query global time range: %w", err)
+	}
+
+	return int64(minVal), int64(maxVal), nil
+}
+
 // scanPriceTimeseries scans multiple rows.
 func scanPriceTimeseries(rows chRows) ([]*domain.PriceTimeseriesPoint, error) {
 	var points []*domain.PriceTimeseriesPoint

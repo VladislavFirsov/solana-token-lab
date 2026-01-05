@@ -28,11 +28,13 @@ type SufficiencyResult struct {
 
 // SufficiencyChecker validates data sufficiency before decision.
 type SufficiencyChecker struct {
-	candidateStore storage.CandidateStore
-	tradeStore     storage.TradeRecordStore
-	swapStore      storage.SwapStore
-	liquidityStore storage.LiquidityEventStore
-	replayRunner   *replay.Runner
+	candidateStore       storage.CandidateStore
+	tradeStore           storage.TradeRecordStore
+	swapStore            storage.SwapStore
+	liquidityStore       storage.LiquidityEventStore
+	priceTimeseriesStore storage.PriceTimeseriesStore
+	liqTimeseriesStore   storage.LiquidityTimeseriesStore
+	replayRunner         *replay.Runner
 }
 
 // NewSufficiencyChecker creates a new sufficiency checker.
@@ -50,6 +52,16 @@ func NewSufficiencyChecker(
 		liquidityStore: liquidityStore,
 		replayRunner:   replayRunner,
 	}
+}
+
+// WithTimeseriesStores adds timeseries stores for coverage check.
+func (c *SufficiencyChecker) WithTimeseriesStores(
+	priceStore storage.PriceTimeseriesStore,
+	liqStore storage.LiquidityTimeseriesStore,
+) *SufficiencyChecker {
+	c.priceTimeseriesStore = priceStore
+	c.liqTimeseriesStore = liqStore
+	return c
 }
 
 // Check performs all 6 sufficiency checks as defined in DECISION_GATE.md section 1.
@@ -215,47 +227,123 @@ func (c *SufficiencyChecker) checkDiscoveryUptime(candidates []*domain.TokenCand
 }
 
 // checkBacktestCoverage: backtest data coverage >= 14 days.
-// Computes time span across all trade entry times (EntrySignalTime).
-//
-// Note: Uses EntrySignalTime as the basis because:
-// 1. Entry signals represent when the trading decision was made
-// 2. This is the most relevant timestamp for strategy evaluation
-// 3. Exit times can extend beyond the discovery window
-//
-// Alternative approaches (not implemented):
-// - Using candidate DiscoveredAt would measure discovery span, not trading span
-// - Using both entry and exit would inflate coverage if exits are delayed
+// Per spec: computes time span from price/liquidity timeseries (not events).
+// Falls back to swap/liquidity events if timeseries stores not configured.
 func (c *SufficiencyChecker) checkBacktestCoverage(ctx context.Context) (SufficiencyCheck, error) {
-	// Get all trades without filtering by strategy/scenario
-	trades, err := c.tradeStore.GetAll(ctx)
-	if err != nil {
+	var minTime, maxTime int64
+	hasData := false
+
+	// Primary: use timeseries stores if available
+	if c.priceTimeseriesStore != nil {
+		priceMin, priceMax, err := c.priceTimeseriesStore.GetGlobalTimeRange(ctx)
+		if err == nil && priceMax > 0 {
+			if !hasData {
+				minTime = priceMin
+				maxTime = priceMax
+				hasData = true
+			} else {
+				if priceMin < minTime {
+					minTime = priceMin
+				}
+				if priceMax > maxTime {
+					maxTime = priceMax
+				}
+			}
+		}
+	}
+
+	if c.liqTimeseriesStore != nil {
+		liqMin, liqMax, err := c.liqTimeseriesStore.GetGlobalTimeRange(ctx)
+		if err == nil && liqMax > 0 {
+			if !hasData {
+				minTime = liqMin
+				maxTime = liqMax
+				hasData = true
+			} else {
+				if liqMin < minTime {
+					minTime = liqMin
+				}
+				if liqMax > maxTime {
+					maxTime = liqMax
+				}
+			}
+		}
+	}
+
+	// Fallback: use swap/liquidity events if timeseries not available
+	if !hasData {
+		newTokenCandidates, err := c.candidateStore.GetBySource(ctx, domain.SourceNewToken)
+		if err != nil {
+			return SufficiencyCheck{
+				Name:      "Backtest data coverage",
+				Threshold: ">= 14 days",
+				Actual:    fmt.Sprintf("error loading NEW_TOKEN candidates: %v", err),
+				Pass:      false,
+			}, nil
+		}
+		activeTokenCandidates, err := c.candidateStore.GetBySource(ctx, domain.SourceActiveToken)
+		if err != nil {
+			return SufficiencyCheck{
+				Name:      "Backtest data coverage",
+				Threshold: ">= 14 days",
+				Actual:    fmt.Sprintf("error loading ACTIVE_TOKEN candidates: %v", err),
+				Pass:      false,
+			}, nil
+		}
+		allCandidates := append(newTokenCandidates, activeTokenCandidates...)
+
+		for _, candidate := range allCandidates {
+			// Check swaps
+			if c.swapStore != nil {
+				swaps, err := c.swapStore.GetByCandidateID(ctx, candidate.CandidateID)
+				if err == nil && len(swaps) > 0 {
+					for _, swap := range swaps {
+						if !hasData {
+							minTime = swap.Timestamp
+							maxTime = swap.Timestamp
+							hasData = true
+						} else {
+							if swap.Timestamp < minTime {
+								minTime = swap.Timestamp
+							}
+							if swap.Timestamp > maxTime {
+								maxTime = swap.Timestamp
+							}
+						}
+					}
+				}
+			}
+
+			// Check liquidity events
+			if c.liquidityStore != nil {
+				liqEvents, err := c.liquidityStore.GetByCandidateID(ctx, candidate.CandidateID)
+				if err == nil && len(liqEvents) > 0 {
+					for _, liq := range liqEvents {
+						if !hasData {
+							minTime = liq.Timestamp
+							maxTime = liq.Timestamp
+							hasData = true
+						} else {
+							if liq.Timestamp < minTime {
+								minTime = liq.Timestamp
+							}
+							if liq.Timestamp > maxTime {
+								maxTime = liq.Timestamp
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if !hasData {
 		return SufficiencyCheck{
 			Name:      "Backtest data coverage",
 			Threshold: ">= 14 days",
-			Actual:    fmt.Sprintf("error: %v", err),
+			Actual:    "0 days (no timeseries data)",
 			Pass:      false,
 		}, nil
-	}
-
-	if len(trades) == 0 {
-		return SufficiencyCheck{
-			Name:      "Backtest data coverage",
-			Threshold: ">= 14 days",
-			Actual:    "0 days (no trades)",
-			Pass:      false,
-		}, nil
-	}
-
-	// Find min and max entry times
-	minTime := trades[0].EntrySignalTime
-	maxTime := trades[0].EntrySignalTime
-	for _, trade := range trades {
-		if trade.EntrySignalTime < minTime {
-			minTime = trade.EntrySignalTime
-		}
-		if trade.EntrySignalTime > maxTime {
-			maxTime = trade.EntrySignalTime
-		}
 	}
 
 	// Compute span in days

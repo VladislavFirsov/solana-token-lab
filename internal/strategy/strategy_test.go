@@ -496,6 +496,64 @@ func TestLiquidityGuardStrategy_MergedEvents_MaxDuration(t *testing.T) {
 	}
 }
 
+func TestCanonicalType(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		// Base types unchanged
+		{"TIME_EXIT", "TIME_EXIT"},
+		{"TRAILING_STOP", "TRAILING_STOP"},
+		{"LIQUIDITY_GUARD", "LIQUIDITY_GUARD"},
+		// Parameterized IDs map to base types
+		{"TIME_EXIT_NEW_TOKEN_300000ms", "TIME_EXIT"},
+		{"TIME_EXIT_ACTIVE_TOKEN_600000ms", "TIME_EXIT"},
+		{"TRAILING_STOP_NEW_TOKEN_trail10_stop10_3600000ms", "TRAILING_STOP"},
+		{"TRAILING_STOP_ACTIVE_TOKEN_trail5_stop8_1800000ms", "TRAILING_STOP"},
+		{"LIQUIDITY_GUARD_NEW_TOKEN_drop30_3600000ms", "LIQUIDITY_GUARD"},
+		{"LIQUIDITY_GUARD_ACTIVE_TOKEN_drop20_1800000ms", "LIQUIDITY_GUARD"},
+		// Unknown types unchanged
+		{"UNKNOWN_STRATEGY", "UNKNOWN_STRATEGY"},
+		{"", ""},
+	}
+
+	for _, tc := range tests {
+		result := CanonicalType(tc.input)
+		if result != tc.expected {
+			t.Errorf("CanonicalType(%q) = %q, expected %q", tc.input, result, tc.expected)
+		}
+	}
+}
+
+func TestStrategyBaseType(t *testing.T) {
+	// Verify BaseType() returns canonical base types
+	timeExit := NewTimeExitStrategy("NEW_TOKEN", 300000)
+	if timeExit.BaseType() != domain.StrategyTypeTimeExit {
+		t.Errorf("TimeExitStrategy.BaseType() = %q, expected %q", timeExit.BaseType(), domain.StrategyTypeTimeExit)
+	}
+
+	trailingStop := NewTrailingStopStrategy("ACTIVE_TOKEN", 0.10, 0.10, 3600000)
+	if trailingStop.BaseType() != domain.StrategyTypeTrailingStop {
+		t.Errorf("TrailingStopStrategy.BaseType() = %q, expected %q", trailingStop.BaseType(), domain.StrategyTypeTrailingStop)
+	}
+
+	liquidityGuard := NewLiquidityGuardStrategy("NEW_TOKEN", 0.30, 1800000)
+	if liquidityGuard.BaseType() != domain.StrategyTypeLiquidityGuard {
+		t.Errorf("LiquidityGuardStrategy.BaseType() = %q, expected %q", liquidityGuard.BaseType(), domain.StrategyTypeLiquidityGuard)
+	}
+
+	// Verify CanonicalType(ID()) == BaseType()
+	if CanonicalType(timeExit.ID()) != timeExit.BaseType() {
+		t.Error("CanonicalType(ID()) should equal BaseType()")
+	}
+	if CanonicalType(trailingStop.ID()) != trailingStop.BaseType() {
+		t.Error("CanonicalType(ID()) should equal BaseType()")
+	}
+	if CanonicalType(liquidityGuard.ID()) != liquidityGuard.BaseType() {
+		t.Error("CanonicalType(ID()) should equal BaseType()")
+	}
+}
+
 func TestStrategyInput_Validate(t *testing.T) {
 	validInput := &StrategyInput{
 		CandidateID:      "test-candidate",

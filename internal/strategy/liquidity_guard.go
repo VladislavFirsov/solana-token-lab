@@ -38,6 +38,11 @@ func (s *LiquidityGuardStrategy) ID() string {
 		s.MaxHoldDurationMs)
 }
 
+// BaseType returns the canonical base strategy type.
+func (s *LiquidityGuardStrategy) BaseType() string {
+	return domain.StrategyTypeLiquidityGuard
+}
+
 // mergedEvent represents a unified event for iteration.
 type mergedEvent struct {
 	TimestampMs int64

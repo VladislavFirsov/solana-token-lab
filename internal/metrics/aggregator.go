@@ -8,6 +8,7 @@ import (
 
 	"solana-token-lab/internal/domain"
 	"solana-token-lab/internal/storage"
+	"solana-token-lab/internal/strategy"
 )
 
 // ErrNoTrades is returned when no trades are available for aggregation.
@@ -35,11 +36,13 @@ func NewAggregator(tradeStore storage.TradeRecordStore, aggStore storage.Strateg
 }
 
 // ComputeAggregate computes aggregate for a specific (strategy_id, scenario_id, entry_event_type).
-// Loads trades matching the key, filters by candidate source, computes all metrics, returns aggregate.
+// Loads trades matching the key (using canonical base type for strategy matching),
+// filters by candidate source, computes all metrics, returns aggregate.
 // Returns ErrNoTrades if no trades match the criteria.
 func (a *Aggregator) ComputeAggregate(ctx context.Context, strategyID, scenarioID, entryEventType string) (*domain.StrategyAggregate, error) {
-	// Load all trades for strategy/scenario combination
-	trades, err := a.tradeRecordStore.GetByStrategyScenario(ctx, strategyID, scenarioID)
+	// Load all trades for scenario and filter by canonical strategy type
+	// This handles parameterized IDs like "TIME_EXIT_NEW_TOKEN_300000ms" matching base type "TIME_EXIT"
+	trades, err := a.loadTradesByCanonicalStrategy(ctx, strategyID, scenarioID)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +60,7 @@ func (a *Aggregator) ComputeAggregate(ctx context.Context, strategyID, scenarioI
 	// Compute aggregate from filtered trades
 	agg := computeFromTrades(filteredTrades, entryEventType)
 
-	// Set strategy and scenario IDs
+	// Set strategy and scenario IDs (use canonical base type)
 	agg.StrategyID = strategyID
 	agg.ScenarioID = scenarioID
 
@@ -65,6 +68,38 @@ func (a *Aggregator) ComputeAggregate(ctx context.Context, strategyID, scenarioI
 	setSensitivityFields(agg)
 
 	return agg, nil
+}
+
+// loadTradesByCanonicalStrategy loads trades matching canonical strategy type and scenario.
+// Maps parameterized strategy IDs to base types for matching.
+func (a *Aggregator) loadTradesByCanonicalStrategy(ctx context.Context, baseStrategyType, scenarioID string) ([]*domain.TradeRecord, error) {
+	// First try exact match (for backwards compatibility or if already using base types)
+	trades, err := a.tradeRecordStore.GetByStrategyScenario(ctx, baseStrategyType, scenarioID)
+	if err != nil {
+		return nil, err
+	}
+	if len(trades) > 0 {
+		return trades, nil
+	}
+
+	// No exact match - load all trades and filter by canonical type
+	allTrades, err := a.tradeRecordStore.GetAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var filtered []*domain.TradeRecord
+	for _, t := range allTrades {
+		if t.ScenarioID != scenarioID {
+			continue
+		}
+		// Match by canonical (base) strategy type
+		if strategy.CanonicalType(t.StrategyID) == baseStrategyType {
+			filtered = append(filtered, t)
+		}
+	}
+
+	return filtered, nil
 }
 
 // filterByEntryEventType filters trades by matching candidate source to entry event type.

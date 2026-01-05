@@ -24,6 +24,10 @@ type Strategy interface {
 
 	// ID returns strategy identifier (includes parameters).
 	ID() string
+
+	// BaseType returns the canonical base strategy type (TIME_EXIT, TRAILING_STOP, LIQUIDITY_GUARD).
+	// Used for aggregation grouping and implementability mapping.
+	BaseType() string
 }
 
 // StrategyInput holds all data needed for strategy execution.
@@ -58,4 +62,27 @@ func (s *StrategyInput) Validate() error {
 		return ErrEmptyScenarioID
 	}
 	return nil
+}
+
+// CanonicalType extracts the base strategy type from a parameterized strategy ID.
+// E.g., "TIME_EXIT_NEW_TOKEN_300000ms" -> "TIME_EXIT"
+//
+//	"TRAILING_STOP_NEW_TOKEN_trail10_stop10_3600000ms" -> "TRAILING_STOP"
+//	"LIQUIDITY_GUARD_ACTIVE_TOKEN_drop30_3600000ms" -> "LIQUIDITY_GUARD"
+//
+// Returns the input unchanged if it's already a base type or unrecognized.
+func CanonicalType(strategyID string) string {
+	switch {
+	case len(strategyID) >= len(domain.StrategyTypeTimeExit) &&
+		strategyID[:len(domain.StrategyTypeTimeExit)] == domain.StrategyTypeTimeExit:
+		return domain.StrategyTypeTimeExit
+	case len(strategyID) >= len(domain.StrategyTypeTrailingStop) &&
+		strategyID[:len(domain.StrategyTypeTrailingStop)] == domain.StrategyTypeTrailingStop:
+		return domain.StrategyTypeTrailingStop
+	case len(strategyID) >= len(domain.StrategyTypeLiquidityGuard) &&
+		strategyID[:len(domain.StrategyTypeLiquidityGuard)] == domain.StrategyTypeLiquidityGuard:
+		return domain.StrategyTypeLiquidityGuard
+	default:
+		return strategyID
+	}
 }

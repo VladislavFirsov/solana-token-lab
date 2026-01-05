@@ -89,8 +89,9 @@ func computeFromTrades(trades []*domain.TradeRecord, entryEventType string) *dom
 }
 
 // computeTokenWinRate calculates token-level win rate.
-// Groups trades by CandidateID, computes mean outcome per token,
+// Groups trades by CandidateID, checks if at least one trade has positive outcome,
 // returns (totalTokens, tokensWithPositiveOutcome / totalTokens).
+// Per MVP_CRITERIA.md: a token is considered "winning" if it has at least one positive outcome.
 func computeTokenWinRate(trades []*domain.TradeRecord) (int, float64) {
 	if len(trades) == 0 {
 		return 0, 0
@@ -106,8 +107,15 @@ func computeTokenWinRate(trades []*domain.TradeRecord) (int, float64) {
 	tokensWithPositiveOutcome := 0
 
 	for _, outcomes := range candidateOutcomes {
-		meanOutcome := computeMean(outcomes)
-		if meanOutcome > 0 {
+		// Check if at least one outcome is positive (not mean)
+		hasPositive := false
+		for _, outcome := range outcomes {
+			if outcome > 0 {
+				hasPositive = true
+				break
+			}
+		}
+		if hasPositive {
 			tokensWithPositiveOutcome++
 		}
 	}
@@ -135,18 +143,19 @@ func computeMean(outcomes []float64) float64 {
 	return sum / float64(len(outcomes))
 }
 
-// computeStddev calculates population standard deviation.
+// computeStddev calculates sample standard deviation (n-1 denominator).
+// Per spec: uses sample formula for unbiased estimator.
 func computeStddev(outcomes []float64, mean float64) float64 {
 	n := len(outcomes)
-	if n == 0 {
-		return 0
+	if n < 2 {
+		return 0 // Need at least 2 samples for sample stddev
 	}
 	sumSq := 0.0
 	for _, o := range outcomes {
 		diff := o - mean
 		sumSq += diff * diff
 	}
-	return math.Sqrt(sumSq / float64(n))
+	return math.Sqrt(sumSq / float64(n-1))
 }
 
 // computePercentile uses linear interpolation.
