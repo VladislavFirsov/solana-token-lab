@@ -137,13 +137,18 @@ func runLive(ctx context.Context, logger *log.Logger, rpcEndpoint, wsEndpoint, p
 	}
 	defer ws.Close()
 
+	// Require --postgres-dsn unless --use-memory is explicitly set
+	if !useMemory && postgresDSN == "" {
+		return fmt.Errorf("--postgres-dsn is required for live mode (use --use-memory for in-memory storage)")
+	}
+
 	// Create stores (use interfaces)
 	var swapEventStore storage.SwapEventStore = memory.NewSwapEventStore()
 	var liquidityStore storage.LiquidityEventStore = memory.NewLiquidityEventStore()
 	var candidateStore storage.CandidateStore = memory.NewCandidateStore()
 	var metadataStore storage.TokenMetadataStore = memory.NewTokenMetadataStore()
 
-	if !useMemory && postgresDSN != "" {
+	if !useMemory {
 		pool, err := pgstore.NewPool(ctx, postgresDSN)
 		if err != nil {
 			return fmt.Errorf("connect to postgres: %w", err)
@@ -193,12 +198,17 @@ func runBackfill(ctx context.Context, logger *log.Logger, rpcEndpoint, postgresD
 	// Create RPC client
 	rpc := solana.NewHTTPClient(rpcEndpoint)
 
+	// Require --postgres-dsn unless --use-memory is explicitly set
+	if !useMemory && postgresDSN == "" {
+		return fmt.Errorf("--postgres-dsn is required for backfill mode (use --use-memory for in-memory storage)")
+	}
+
 	// Create stores (use interfaces)
 	var swapEventStore storage.SwapEventStore = memory.NewSwapEventStore()
 	var liquidityStore storage.LiquidityEventStore = memory.NewLiquidityEventStore()
 	var candidateStore storage.CandidateStore = memory.NewCandidateStore()
 
-	if !useMemory && postgresDSN != "" {
+	if !useMemory {
 		pool, err := pgstore.NewPool(ctx, postgresDSN)
 		if err != nil {
 			return fmt.Errorf("connect to postgres: %w", err)
@@ -266,11 +276,16 @@ func runBackfill(ctx context.Context, logger *log.Logger, rpcEndpoint, postgresD
 
 // runReplay runs discovery replay from stored events.
 func runReplay(ctx context.Context, logger *log.Logger, postgresDSN, fromTimeStr, toTimeStr string, useMemory bool) error {
+	// Require --postgres-dsn unless --use-memory is explicitly set
+	if !useMemory && postgresDSN == "" {
+		return fmt.Errorf("--postgres-dsn is required for replay mode (use --use-memory for in-memory storage)")
+	}
+
 	// Create stores (use interfaces)
 	var swapEventStore storage.SwapEventStore = memory.NewSwapEventStore()
 	var candidateStore storage.CandidateStore = memory.NewCandidateStore()
 
-	if !useMemory && postgresDSN != "" {
+	if !useMemory {
 		pool, err := pgstore.NewPool(ctx, postgresDSN)
 		if err != nil {
 			return fmt.Errorf("connect to postgres: %w", err)

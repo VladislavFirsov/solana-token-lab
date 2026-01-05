@@ -364,10 +364,11 @@ func (r *Runner) runActiveTokenDetection(ctx context.Context) {
 	}
 
 	// Use last processed event time for deterministic detection across live/replay
+	// If no events processed yet, skip detection to maintain determinism
 	evalTime := r.lastEventTime
 	if evalTime == 0 {
-		// Fallback to wall-clock if no events processed yet
-		evalTime = time.Now().UnixMilli()
+		r.logger.Println("Skipping ACTIVE_TOKEN detection: no events processed yet")
+		return
 	}
 	r.logger.Printf("Running ACTIVE_TOKEN detection at %d", evalTime)
 

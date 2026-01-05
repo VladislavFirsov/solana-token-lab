@@ -12,3 +12,7 @@ workflow/
 
 # Logs
 *.log
+
+# Binaries
+/ingest
+/replay
