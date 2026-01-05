@@ -155,7 +155,7 @@ Generated at: YYYY-MM-DD HH:MM:SS UTC
 | 1 | Positive outcome tokens | >= 5% | X.XX% | PASS/FAIL |
 | 2 | Median outcome | > 0 | X.XXXX | PASS/FAIL |
 | 3 | Stable under degradation | ... | ... | PASS/FAIL |
-| 4 | Not dominated by outliers | P50 > 0 | X.XXXX | PASS/FAIL |
+| 4 | Not dominated by outliers | P25 > 0 | X.XXXX | PASS/FAIL |
 | 5 | Entry/exit implementable | true | true/false | PASS/FAIL |
 
 GO Criteria: N/5 passed

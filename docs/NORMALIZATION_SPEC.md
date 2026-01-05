@@ -54,7 +54,10 @@ If multiple swaps have the same `(candidate_id, timestamp_ms)`:
 price      = LAST(price) by event order
 volume     = SUM(amount_out)
 swap_count = COUNT(*)
+slot       = LAST(slot) by event order
 ```
+
+**Note:** The `slot` field uses LAST() semantics to maintain consistency with the `price` field, which also uses LAST(). This ensures the slot corresponds to the final swap that determined the aggregated price.
 
 **Output Schema:**
 
@@ -94,7 +97,10 @@ If multiple events have the same `(candidate_id, timestamp_ms)`:
 liquidity       = LAST(liquidity_after) by event order
 liquidity_token = LAST(amount_token)
 liquidity_quote = LAST(amount_quote)
+slot            = LAST(slot) by event order
 ```
+
+**Note:** The `slot` field uses LAST() semantics to maintain consistency with the `liquidity` field. This ensures the slot corresponds to the final event that determined the aggregated liquidity state.
 
 **Output Schema:**
 

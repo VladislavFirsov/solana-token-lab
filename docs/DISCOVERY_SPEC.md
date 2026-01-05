@@ -53,31 +53,53 @@ An ACTIVE_TOKEN is discovered when an existing token exhibits a volume or swap a
 ### Spike Criteria (Formal)
 
 ```
-volume_spike = volume_1h > K_vol * volume_24h_avg
-swaps_spike = swaps_1h > K_swaps * swaps_24h_avg
+volume_spike = volume_1h > K_vol * volume_avg
+swaps_spike = swaps_1h > K_swaps * swaps_avg
 
 WHERE:
     K_vol = 3.0
     K_swaps = 5.0
 
+    # 1-hour window metrics
     volume_1h = SUM(amount_out)
                 FOR swaps WHERE timestamp IN [now_ms - 3600000, now_ms]
-
-    volume_24h_avg = SUM(amount_out)
-                     FOR swaps WHERE timestamp IN [now_ms - 86400000, now_ms]
-                     / 24
 
     swaps_1h = COUNT(swaps)
                WHERE timestamp IN [now_ms - 3600000, now_ms]
 
-    swaps_24h_avg = COUNT(swaps)
-                    WHERE timestamp IN [now_ms - 86400000, now_ms]
-                    / 24
+    # History normalization
+    first_swap_time = MIN(timestamp) FOR mint
+    actual_history_ms = MIN(now_ms - first_swap_time, 86400000)
+    actual_history_hours = actual_history_ms / 3600000
+
+    # Minimum history requirement (prevents false positives)
+    IF actual_history_hours < 1:
+        SKIP token (insufficient data)
+
+    # 24-hour totals (capped at available history)
+    volume_24h = SUM(amount_out)
+                 FOR swaps WHERE timestamp IN [now_ms - actual_history_ms, now_ms]
+
+    swaps_24h = COUNT(swaps)
+                WHERE timestamp IN [now_ms - actual_history_ms, now_ms]
+
+    # Hourly averages normalized by actual history
+    volume_avg = volume_24h / actual_history_hours
+    swaps_avg = swaps_24h / actual_history_hours
 
 TRIGGER:
     IF (volume_spike OR swaps_spike) AND NOT already_discovered:
         emit ACTIVE_TOKEN candidate
 ```
+
+**Rationale for History Normalization:**
+
+The implementation normalizes by actual available history (capped at 24 hours) rather than using a fixed divisor of 24. This prevents false positive spikes for tokens with less than 24 hours of history.
+
+**Example:**
+- Token with 6 hours of history and 600 volume
+- Fixed divisor: `volume_avg = 600 / 24 = 25` → false spike detection
+- Dynamic divisor: `volume_avg = 600 / 6 = 100` → accurate baseline
 
 ### Captured Fields
 
@@ -280,7 +302,9 @@ WHERE r.candidate_id IS NULL OR s.candidate_id IS NULL;
 
 | Case | Handling |
 |------|----------|
-| Token with <24h history | Use available history, may trigger on lower absolute volume |
+| Token with <1h history | **Skipped** — minimum 1 hour history required |
+| Token with 1-24h history | Baseline normalized by actual history hours |
+| Token with >=24h history | Baseline normalized by 24 (capped) |
 | Spike exactly at threshold | Triggers (uses `>` not `>=`) |
 | Multiple spikes same token | Only first spike generates candidate |
 | Token already discovered (any source) | **Excluded** — each mint has exactly one candidate |

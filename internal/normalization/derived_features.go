@@ -39,8 +39,9 @@ func ComputeDerivedFeatures(
 	// Build liquidity lookup by (candidateID, timestamp)
 	liqLookup := buildLiquidityLookup(liquidityTS)
 
-	// Track previous liquidity timestamp per candidate
-	prevLiqTimestamp := make(map[string]int64)
+	// Build sorted liquidity timestamps per candidate for last_liq_event_interval_ms calculation
+	// This tracks ALL liquidity events, not just those matching price timestamps
+	liqTimestampsByCandidate := buildSortedLiquidityTimestamps(liquidityTS)
 
 	// Compute MIN(timestamp_ms) per candidate for token_lifetime_ms
 	minTimestamp := make(map[string]int64)
@@ -109,29 +110,33 @@ func ComputeDerivedFeatures(
 			}
 		}
 
-		// Liquidity features - only if matching timestamp exists
+		// Liquidity features - only if matching timestamp exists for delta/velocity
 		liqKey := liqLookupKey{candidateID: candidateID, timestamp: timestamp}
 		if liq, ok := liqLookup[liqKey]; ok {
-			// Check if we have previous liquidity event for this candidate
-			if prevLiqTs, hasPrev := prevLiqTimestamp[candidateID]; hasPrev {
-				// Find previous liquidity value
-				prevLiqKey := liqLookupKey{candidateID: candidateID, timestamp: prevLiqTs}
+			// Find previous liquidity event that has matching timestamp in liqLookup
+			// This is for delta/velocity calculation which requires both points to have data
+			prevLiqTs := findPrevLiquidityEventTimestamp(liqTimestampsByCandidate[candidateID], timestamp)
+			if prevLiqTs != nil {
+				prevLiqKey := liqLookupKey{candidateID: candidateID, timestamp: *prevLiqTs}
 				if prevLiq, ok := liqLookup[prevLiqKey]; ok {
 					liqDelta := liq.Liquidity - prevLiq.Liquidity
 					point.LiquidityDelta = &liqDelta
 
-					timeDelta := timestamp - prevLiqTs
+					timeDelta := timestamp - *prevLiqTs
 					if timeDelta > 0 {
 						liqVelocity := liqDelta / float64(timeDelta)
 						point.LiquidityVelocity = &liqVelocity
 					}
-
-					// last_liq_event_interval_ms
-					liqInterval := timestamp - prevLiqTs
-					point.LastLiqEventIntervalMs = &liqInterval
 				}
 			}
-			prevLiqTimestamp[candidateID] = timestamp
+		}
+
+		// last_liq_event_interval_ms - tracks ALL liquidity events, not just matching ones
+		// Per spec: "milliseconds since previous liquidity event" regardless of price timestamps
+		prevLiqTs := findPrevLiquidityEventTimestamp(liqTimestampsByCandidate[candidateID], timestamp)
+		if prevLiqTs != nil {
+			liqInterval := timestamp - *prevLiqTs
+			point.LastLiqEventIntervalMs = &liqInterval
 		}
 
 		// Update previous values for next iteration
@@ -156,4 +161,46 @@ func buildLiquidityLookup(liquidityTS []*domain.LiquidityTimeseriesPoint) map[li
 		lookup[key] = l
 	}
 	return lookup
+}
+
+// buildSortedLiquidityTimestamps builds a map of candidateID -> sorted timestamps
+// for ALL liquidity events. This is used to find previous liquidity events
+// regardless of whether they match price timestamps.
+func buildSortedLiquidityTimestamps(liquidityTS []*domain.LiquidityTimeseriesPoint) map[string][]int64 {
+	result := make(map[string][]int64)
+	for _, l := range liquidityTS {
+		result[l.CandidateID] = append(result[l.CandidateID], l.TimestampMs)
+	}
+	// Sort each candidate's timestamps
+	for candidateID := range result {
+		timestamps := result[candidateID]
+		sort.Slice(timestamps, func(i, j int) bool {
+			return timestamps[i] < timestamps[j]
+		})
+		result[candidateID] = timestamps
+	}
+	return result
+}
+
+// findPrevLiquidityEventTimestamp finds the most recent liquidity event timestamp
+// strictly before the target timestamp using binary search.
+// Returns nil if no previous event exists.
+func findPrevLiquidityEventTimestamp(timestamps []int64, target int64) *int64 {
+	if len(timestamps) == 0 {
+		return nil
+	}
+
+	// Binary search for the first timestamp >= target
+	idx := sort.Search(len(timestamps), func(i int) bool {
+		return timestamps[i] >= target
+	})
+
+	// idx points to first timestamp >= target
+	// We want the one before that (strictly < target)
+	if idx > 0 {
+		prev := timestamps[idx-1]
+		return &prev
+	}
+
+	return nil
 }

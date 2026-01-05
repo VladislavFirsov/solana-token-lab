@@ -486,3 +486,136 @@ func TestRunner_Empty(t *testing.T) {
 		t.Errorf("Expected 0 price points, got %d", len(priceTS))
 	}
 }
+
+// TestComputeDerivedFeatures_LiquidityEventsBetweenPrices tests that last_liq_event_interval_ms
+// correctly tracks ALL liquidity events, not just those matching price timestamps.
+// This is critical per NORMALIZATION_SPEC.md section 5.3.
+func TestComputeDerivedFeatures_LiquidityEventsBetweenPrices(t *testing.T) {
+	// Price events at: 1000, 5000, 10000
+	priceTS := []*domain.PriceTimeseriesPoint{
+		{CandidateID: "c1", TimestampMs: 1000, Price: 1.0},
+		{CandidateID: "c1", TimestampMs: 5000, Price: 2.0},
+		{CandidateID: "c1", TimestampMs: 10000, Price: 3.0},
+	}
+
+	// Liquidity events at: 500, 2000, 3000, 8000
+	// Note: 500 < first price (1000), so no interval for price at 1000
+	// Note: 2000 and 3000 are BETWEEN price timestamps 1000 and 5000
+	// For price at 5000: prev liquidity event is at 3000 -> interval = 2000
+	// For price at 10000: prev liquidity event is at 8000 -> interval = 2000
+	liquidityTS := []*domain.LiquidityTimeseriesPoint{
+		{CandidateID: "c1", TimestampMs: 500, Liquidity: 100.0},
+		{CandidateID: "c1", TimestampMs: 2000, Liquidity: 200.0},
+		{CandidateID: "c1", TimestampMs: 3000, Liquidity: 300.0},
+		{CandidateID: "c1", TimestampMs: 8000, Liquidity: 400.0},
+	}
+
+	result := ComputeDerivedFeatures(priceTS, liquidityTS)
+
+	if len(result) != 3 {
+		t.Fatalf("Expected 3 points, got %d", len(result))
+	}
+
+	// Price at 1000: prev liquidity at 500 -> interval = 500
+	if result[0].LastLiqEventIntervalMs == nil {
+		t.Error("Point 0 (price at 1000): LastLiqEventIntervalMs should NOT be NULL - there's a liquidity event at 500")
+	} else if *result[0].LastLiqEventIntervalMs != 500 {
+		t.Errorf("Point 0: expected LastLiqEventIntervalMs 500, got %d", *result[0].LastLiqEventIntervalMs)
+	}
+
+	// Price at 5000: prev liquidity at 3000 -> interval = 2000
+	if result[1].LastLiqEventIntervalMs == nil {
+		t.Error("Point 1 (price at 5000): LastLiqEventIntervalMs should NOT be NULL")
+	} else if *result[1].LastLiqEventIntervalMs != 2000 {
+		t.Errorf("Point 1: expected LastLiqEventIntervalMs 2000 (5000-3000), got %d", *result[1].LastLiqEventIntervalMs)
+	}
+
+	// Price at 10000: prev liquidity at 8000 -> interval = 2000
+	if result[2].LastLiqEventIntervalMs == nil {
+		t.Error("Point 2 (price at 10000): LastLiqEventIntervalMs should NOT be NULL")
+	} else if *result[2].LastLiqEventIntervalMs != 2000 {
+		t.Errorf("Point 2: expected LastLiqEventIntervalMs 2000 (10000-8000), got %d", *result[2].LastLiqEventIntervalMs)
+	}
+
+	// Verify that LiquidityDelta is still NULL for non-matching timestamps
+	// Price at 1000: no liquidity at this exact timestamp
+	if result[0].LiquidityDelta != nil {
+		t.Error("Point 0: LiquidityDelta should be NULL (no matching liquidity timestamp)")
+	}
+	// Price at 5000: no liquidity at this exact timestamp
+	if result[1].LiquidityDelta != nil {
+		t.Error("Point 1: LiquidityDelta should be NULL (no matching liquidity timestamp)")
+	}
+	// Price at 10000: no liquidity at this exact timestamp
+	if result[2].LiquidityDelta != nil {
+		t.Error("Point 2: LiquidityDelta should be NULL (no matching liquidity timestamp)")
+	}
+}
+
+// TestFindPrevLiquidityEventTimestamp tests the binary search helper function
+func TestFindPrevLiquidityEventTimestamp(t *testing.T) {
+	tests := []struct {
+		name       string
+		timestamps []int64
+		target     int64
+		want       *int64
+	}{
+		{
+			name:       "empty list",
+			timestamps: nil,
+			target:     1000,
+			want:       nil,
+		},
+		{
+			name:       "target before all",
+			timestamps: []int64{500, 1000, 1500},
+			target:     100,
+			want:       nil,
+		},
+		{
+			name:       "target equals first",
+			timestamps: []int64{500, 1000, 1500},
+			target:     500,
+			want:       nil, // strictly less than
+		},
+		{
+			name:       "target between first and second",
+			timestamps: []int64{500, 1000, 1500},
+			target:     750,
+			want:       ptrInt64(500),
+		},
+		{
+			name:       "target after all",
+			timestamps: []int64{500, 1000, 1500},
+			target:     2000,
+			want:       ptrInt64(1500),
+		},
+		{
+			name:       "target equals middle",
+			timestamps: []int64{500, 1000, 1500},
+			target:     1000,
+			want:       ptrInt64(500), // strictly less than
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := findPrevLiquidityEventTimestamp(tt.timestamps, tt.target)
+			if tt.want == nil {
+				if got != nil {
+					t.Errorf("expected nil, got %d", *got)
+				}
+			} else {
+				if got == nil {
+					t.Errorf("expected %d, got nil", *tt.want)
+				} else if *got != *tt.want {
+					t.Errorf("expected %d, got %d", *tt.want, *got)
+				}
+			}
+		})
+	}
+}
+
+func ptrInt64(v int64) *int64 {
+	return &v
+}
