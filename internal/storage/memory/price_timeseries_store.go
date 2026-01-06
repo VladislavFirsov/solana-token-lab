@@ -61,8 +61,8 @@ func (s *PriceTimeseriesStore) InsertBulk(_ context.Context, points []*domain.Pr
 	// Second pass: insert all
 	for _, p := range points {
 		key := priceKey(p.CandidateID, p.TimestampMs)
-		copy := *p
-		s.data[key] = &copy
+		pointCopy := *p
+		s.data[key] = &pointCopy
 	}
 
 	return nil
@@ -76,8 +76,8 @@ func (s *PriceTimeseriesStore) GetByCandidateID(_ context.Context, candidateID s
 	var result []*domain.PriceTimeseriesPoint
 	for _, p := range s.data {
 		if p.CandidateID == candidateID {
-			copy := *p
-			result = append(result, &copy)
+			pointCopy := *p
+			result = append(result, &pointCopy)
 		}
 	}
 
@@ -96,8 +96,8 @@ func (s *PriceTimeseriesStore) GetByTimeRange(_ context.Context, candidateID str
 	var result []*domain.PriceTimeseriesPoint
 	for _, p := range s.data {
 		if p.CandidateID == candidateID && p.TimestampMs >= start && p.TimestampMs <= end {
-			copy := *p
-			result = append(result, &copy)
+			pointCopy := *p
+			result = append(result, &pointCopy)
 		}
 	}
 

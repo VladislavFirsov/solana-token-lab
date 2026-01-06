@@ -226,7 +226,25 @@ func (p *Phase1Pipeline) Run(ctx context.Context) error {
 			return err
 		}
 
-		return p.writeInsufficientDataReport(dataQuality)
+		if err := p.writeInsufficientDataReport(dataQuality); err != nil {
+			return err
+		}
+
+		// Write additional artifacts even for INSUFFICIENT_DATA
+		if err := p.writeReportJSON(report); err != nil {
+			return err
+		}
+		if err := p.writeMetadata(report); err != nil {
+			return err
+		}
+		if err := p.writeMetricsQueries(); err != nil {
+			return err
+		}
+		if err := p.writeChecksums(); err != nil {
+			return err
+		}
+
+		return nil
 	}
 
 	// 11. Otherwise proceed with GO/NO-GO evaluation
@@ -367,36 +385,41 @@ func (p *Phase1Pipeline) buildReplayCommand() string {
 
 // computeDataVersion computes SHA256 hash per REPORTING_SPEC section 3.2:
 // data_version = SHA256(SHA256(price_timeseries) || SHA256(liquidity_timeseries) || SHA256(candidates))
-// Falls back to trades-based hash if raw data stores not configured.
+// Falls back to trades-based hash if raw data stores not configured or on error.
 func (p *Phase1Pipeline) computeDataVersion(ctx context.Context, report *reporting.Report, trades []*domain.TradeRecord) string {
 	// Use raw data stores if configured (per spec)
 	if p.candidateStoreForHash != nil && p.priceTimeseriesStoreHash != nil && p.liqTimeseriesStoreHash != nil {
-		return p.computeDataVersionFromRaw(ctx)
+		hash, err := p.computeDataVersionFromRaw(ctx)
+		if err != nil {
+			// Fall back to trades-based hash on error
+			fmt.Fprintf(os.Stderr, "WARNING: raw data hash failed, using fallback: %v\n", err)
+			return p.computeDataVersionFromTrades(report, trades)
+		}
+		return hash
 	}
 	// Fallback: use trades-based hash
 	return p.computeDataVersionFromTrades(report, trades)
 }
 
 // computeDataVersionFromRaw computes hash from raw data per REPORTING_SPEC.
-// Logs warnings for any errors encountered during hashing (does not fail).
-func (p *Phase1Pipeline) computeDataVersionFromRaw(ctx context.Context) string {
+// Returns error if any hash computation fails to ensure deterministic results.
+func (p *Phase1Pipeline) computeDataVersionFromRaw(ctx context.Context) (string, error) {
 	// Hash candidates
-	candidatesHash, candidatesErr := p.hashCandidates(ctx)
-	if candidatesErr != nil {
-		// Log warning but continue - partial hash is better than no hash
-		fmt.Fprintf(os.Stderr, "WARNING: error hashing candidates: %v\n", candidatesErr)
+	candidatesHash, err := p.hashCandidates(ctx)
+	if err != nil {
+		return "", fmt.Errorf("hash candidates: %w", err)
 	}
 
 	// Hash price timeseries
-	priceHash, priceErr := p.hashPriceTimeseries(ctx)
-	if priceErr != nil {
-		fmt.Fprintf(os.Stderr, "WARNING: error hashing price timeseries: %v\n", priceErr)
+	priceHash, err := p.hashPriceTimeseries(ctx)
+	if err != nil {
+		return "", fmt.Errorf("hash price timeseries: %w", err)
 	}
 
 	// Hash liquidity timeseries
-	liqHash, liqErr := p.hashLiquidityTimeseries(ctx)
-	if liqErr != nil {
-		fmt.Fprintf(os.Stderr, "WARNING: error hashing liquidity timeseries: %v\n", liqErr)
+	liqHash, err := p.hashLiquidityTimeseries(ctx)
+	if err != nil {
+		return "", fmt.Errorf("hash liquidity timeseries: %w", err)
 	}
 
 	// Combine: SHA256(priceHash || liqHash || candidatesHash)
@@ -406,7 +429,7 @@ func (p *Phase1Pipeline) computeDataVersionFromRaw(ctx context.Context) string {
 	h.Write(candidatesHash)
 
 	// Full SHA256 hash per REPORTING_SPEC.md section 3.1
-	return hex.EncodeToString(h.Sum(nil))
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // hashCandidates returns SHA256 of all candidates (sorted by candidate_id).
@@ -424,7 +447,10 @@ func (p *Phase1Pipeline) hashCandidates(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return h.Sum(nil), fmt.Errorf("get ACTIVE_TOKEN candidates: %w", err)
 	}
-	all := append(newTokens, activeTokens...)
+	// Safe merge: create new slice to avoid mutating original slices
+	all := make([]*domain.TokenCandidate, 0, len(newTokens)+len(activeTokens))
+	all = append(all, newTokens...)
+	all = append(all, activeTokens...)
 
 	// Sort by candidate_id for determinism
 	sort.Slice(all, func(i, j int) bool {
@@ -462,7 +488,10 @@ func (p *Phase1Pipeline) hashPriceTimeseries(ctx context.Context) ([]byte, error
 	if err != nil {
 		return h.Sum(nil), fmt.Errorf("get ACTIVE_TOKEN candidates: %w", err)
 	}
-	all := append(newTokens, activeTokens...)
+	// Safe merge: create new slice to avoid mutating original slices
+	all := make([]*domain.TokenCandidate, 0, len(newTokens)+len(activeTokens))
+	all = append(all, newTokens...)
+	all = append(all, activeTokens...)
 
 	// Sort candidates for determinism
 	sort.Slice(all, func(i, j int) bool {
@@ -505,7 +534,10 @@ func (p *Phase1Pipeline) hashLiquidityTimeseries(ctx context.Context) ([]byte, e
 	if err != nil {
 		return h.Sum(nil), fmt.Errorf("get ACTIVE_TOKEN candidates: %w", err)
 	}
-	all := append(newTokens, activeTokens...)
+	// Safe merge: create new slice to avoid mutating original slices
+	all := make([]*domain.TokenCandidate, 0, len(newTokens)+len(activeTokens))
+	all = append(all, newTokens...)
+	all = append(all, activeTokens...)
 
 	// Sort candidates for determinism
 	sort.Slice(all, func(i, j int) bool {

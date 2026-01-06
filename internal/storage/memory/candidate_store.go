@@ -36,8 +36,8 @@ func (s *CandidateStore) Insert(_ context.Context, c *domain.TokenCandidate) err
 	}
 
 	// Store a copy to prevent external mutation
-	copy := *c
-	s.data[c.CandidateID] = &copy
+	candidateCopy := *c
+	s.data[c.CandidateID] = &candidateCopy
 	return nil
 }
 
@@ -52,8 +52,8 @@ func (s *CandidateStore) GetByID(_ context.Context, candidateID string) (*domain
 	}
 
 	// Return a copy
-	copy := *c
-	return &copy, nil
+	candidateCopy := *c
+	return &candidateCopy, nil
 }
 
 // GetByMint retrieves all candidates for a given mint address.
@@ -64,8 +64,8 @@ func (s *CandidateStore) GetByMint(_ context.Context, mint string) ([]*domain.To
 	var result []*domain.TokenCandidate
 	for _, c := range s.data {
 		if c.Mint == mint {
-			copy := *c
-			result = append(result, &copy)
+			candidateCopy := *c
+			result = append(result, &candidateCopy)
 		}
 	}
 
@@ -85,8 +85,8 @@ func (s *CandidateStore) GetByTimeRange(_ context.Context, start, end int64) ([]
 	var result []*domain.TokenCandidate
 	for _, c := range s.data {
 		if c.DiscoveredAt >= start && c.DiscoveredAt <= end {
-			copy := *c
-			result = append(result, &copy)
+			candidateCopy := *c
+			result = append(result, &candidateCopy)
 		}
 	}
 
@@ -106,8 +106,8 @@ func (s *CandidateStore) GetBySource(_ context.Context, source domain.Source) ([
 	var result []*domain.TokenCandidate
 	for _, c := range s.data {
 		if c.Source == source {
-			copy := *c
-			result = append(result, &copy)
+			candidateCopy := *c
+			result = append(result, &candidateCopy)
 		}
 	}
 

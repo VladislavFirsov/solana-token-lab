@@ -43,8 +43,8 @@ func (s *StrategyAggregateStore) Insert(_ context.Context, a *domain.StrategyAgg
 		return storage.ErrDuplicateKey
 	}
 
-	copy := *a
-	s.data[key] = &copy
+	aggCopy := *a
+	s.data[key] = &aggCopy
 	return nil
 }
 
@@ -81,8 +81,8 @@ func (s *StrategyAggregateStore) InsertBulk(_ context.Context, aggregates []*dom
 	// Second pass: insert all
 	for _, a := range aggregates {
 		key := aggregateKey(a.StrategyID, a.ScenarioID, a.EntryEventType)
-		copy := *a
-		s.data[key] = &copy
+		aggCopy := *a
+		s.data[key] = &aggCopy
 	}
 
 	return nil
@@ -99,8 +99,8 @@ func (s *StrategyAggregateStore) GetByKey(_ context.Context, strategyID, scenari
 		return nil, storage.ErrNotFound
 	}
 
-	copy := *a
-	return &copy, nil
+	aggCopy := *a
+	return &aggCopy, nil
 }
 
 // GetByStrategy retrieves all aggregates for a strategy.
@@ -111,8 +111,8 @@ func (s *StrategyAggregateStore) GetByStrategy(_ context.Context, strategyID str
 	var result []*domain.StrategyAggregate
 	for _, a := range s.data {
 		if a.StrategyID == strategyID {
-			copy := *a
-			result = append(result, &copy)
+			aggCopy := *a
+			result = append(result, &aggCopy)
 		}
 	}
 
@@ -134,8 +134,8 @@ func (s *StrategyAggregateStore) GetAll(_ context.Context) ([]*domain.StrategyAg
 
 	var result []*domain.StrategyAggregate
 	for _, a := range s.data {
-		copy := *a
-		result = append(result, &copy)
+		aggCopy := *a
+		result = append(result, &aggCopy)
 	}
 
 	// Sort by strategy, scenario, entry event type

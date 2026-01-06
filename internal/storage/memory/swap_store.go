@@ -43,8 +43,8 @@ func (s *SwapStore) Insert(_ context.Context, swap *domain.Swap) error {
 		return storage.ErrDuplicateKey
 	}
 
-	copy := *swap
-	s.data[key] = &copy
+	swapCopy := *swap
+	s.data[key] = &swapCopy
 	return nil
 }
 
@@ -81,8 +81,8 @@ func (s *SwapStore) InsertBulk(_ context.Context, swaps []*domain.Swap) error {
 	// Second pass: insert all
 	for _, swap := range swaps {
 		key := swapKey(swap.CandidateID, swap.TxSignature, swap.EventIndex)
-		copy := *swap
-		s.data[key] = &copy
+		swapCopy := *swap
+		s.data[key] = &swapCopy
 	}
 
 	return nil
@@ -96,8 +96,8 @@ func (s *SwapStore) GetByCandidateID(_ context.Context, candidateID string) ([]*
 	var result []*domain.Swap
 	for _, swap := range s.data {
 		if swap.CandidateID == candidateID {
-			copy := *swap
-			result = append(result, &copy)
+			swapCopy := *swap
+			result = append(result, &swapCopy)
 		}
 	}
 
@@ -119,8 +119,8 @@ func (s *SwapStore) GetByTimeRange(_ context.Context, candidateID string, start,
 	var result []*domain.Swap
 	for _, swap := range s.data {
 		if swap.CandidateID == candidateID && swap.Timestamp >= start && swap.Timestamp <= end {
-			copy := *swap
-			result = append(result, &copy)
+			swapCopy := *swap
+			result = append(result, &swapCopy)
 		}
 	}
 

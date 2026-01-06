@@ -40,9 +40,9 @@ func (s *TokenMetadataStore) Insert(_ context.Context, m *domain.TokenMetadata) 
 		return storage.ErrDuplicateKey
 	}
 
-	copy := *m
-	s.byCandidate[m.CandidateID] = &copy
-	s.byMint[m.Mint] = &copy
+	metaCopy := *m
+	s.byCandidate[m.CandidateID] = &metaCopy
+	s.byMint[m.Mint] = &metaCopy
 	return nil
 }
 
@@ -56,8 +56,8 @@ func (s *TokenMetadataStore) GetByID(_ context.Context, candidateID string) (*do
 		return nil, storage.ErrNotFound
 	}
 
-	copy := *m
-	return &copy, nil
+	metaCopy := *m
+	return &metaCopy, nil
 }
 
 // GetByMint retrieves metadata by mint address. Returns ErrNotFound if not exists.
@@ -70,8 +70,8 @@ func (s *TokenMetadataStore) GetByMint(_ context.Context, mint string) (*domain.
 		return nil, storage.ErrNotFound
 	}
 
-	copy := *m
-	return &copy, nil
+	metaCopy := *m
+	return &metaCopy, nil
 }
 
 var _ storage.TokenMetadataStore = (*TokenMetadataStore)(nil)

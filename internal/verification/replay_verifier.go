@@ -143,7 +143,11 @@ func (v *ReplayVerifier) replayTrade(ctx context.Context, stored *domain.TradeRe
 	}
 
 	// 2.1 Validate entry event source matches strategy config per REPLAY_PROTOCOL.md Section 4.1
-	if strategyCfg.EntryEventType != "" && string(candidate.Source) != stra
+	if strategyCfg.EntryEventType != "" && string(candidate.Source) != strategyCfg.EntryEventType {
+		return nil, errors.New("candidate source " + string(candidate.Source) +
+			" does not match strategy entry type " + strategyCfg.EntryEventType)
+	}
+
 	// 3. Get scenario config
 	scenarioCfg, ok := v.scenarioConfigs[stored.ScenarioID]
 	if !ok {

@@ -61,8 +61,8 @@ func (s *LiquidityTimeseriesStore) InsertBulk(_ context.Context, points []*domai
 	// Second pass: insert all
 	for _, p := range points {
 		key := liquidityTsKey(p.CandidateID, p.TimestampMs)
-		copy := *p
-		s.data[key] = &copy
+		pointCopy := *p
+		s.data[key] = &pointCopy
 	}
 
 	return nil
@@ -76,8 +76,8 @@ func (s *LiquidityTimeseriesStore) GetByCandidateID(_ context.Context, candidate
 	var result []*domain.LiquidityTimeseriesPoint
 	for _, p := range s.data {
 		if p.CandidateID == candidateID {
-			copy := *p
-			result = append(result, &copy)
+			pointCopy := *p
+			result = append(result, &pointCopy)
 		}
 	}
 
@@ -96,8 +96,8 @@ func (s *LiquidityTimeseriesStore) GetByTimeRange(_ context.Context, candidateID
 	var result []*domain.LiquidityTimeseriesPoint
 	for _, p := range s.data {
 		if p.CandidateID == candidateID && p.TimestampMs >= start && p.TimestampMs <= end {
-			copy := *p
-			result = append(result, &copy)
+			pointCopy := *p
+			result = append(result, &pointCopy)
 		}
 	}
 

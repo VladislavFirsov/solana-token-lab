@@ -443,7 +443,9 @@ func TestFloatEquals(t *testing.T) {
 	}{
 		{"exact match", 1.0, 1.0, true},
 		{"within tolerance", 1.0, 1.0 + FloatTolerance/2, true},
-		{"at tolerance boundary", 1.0, 1.0 + FloatTolerance, true},
+		// Note: exact boundary test removed because floating-point arithmetic
+		// makes 1.0 + FloatTolerance slightly > 1e-7 apart from 1.0
+		{"just within tolerance", 1.0, 1.0 + FloatTolerance*0.99, true},
 		{"beyond tolerance", 1.0, 1.0 + FloatTolerance*2, false},
 		{"zeros", 0.0, 0.0, true},
 		{"small values", 1e-10, 1e-10, true},

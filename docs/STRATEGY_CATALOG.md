@@ -134,16 +134,17 @@ FOR each price_t after entry_time:
     peak_price = MAX(price_t) for all t in [entry_time, current_time]
     trailing_stop = peak_price * (1 - trail_pct)
 
-    IF price_t < trailing_stop:
-        exit_time = t
-        exit_price = price_t
-        exit_reason = "TRAILING_STOP"
-        BREAK
-
+    -- Check exit conditions (order matters per SIMULATION_SPEC.md)
     IF price_t < initial_stop:
         exit_time = t
         exit_price = price_t
         exit_reason = "INITIAL_STOP"
+        BREAK
+
+    IF price_t < trailing_stop:
+        exit_time = t
+        exit_price = price_t
+        exit_reason = "TRAILING_STOP"
         BREAK
 
     IF (t - entry_time) >= max_hold_duration:

@@ -35,8 +35,8 @@ func (s *TradeRecordStore) Insert(_ context.Context, t *domain.TradeRecord) erro
 		return storage.ErrDuplicateKey
 	}
 
-	copy := *t
-	s.data[t.TradeID] = &copy
+	tradeCopy := *t
+	s.data[t.TradeID] = &tradeCopy
 	return nil
 }
 
@@ -71,8 +71,8 @@ func (s *TradeRecordStore) InsertBulk(_ context.Context, trades []*domain.TradeR
 
 	// Second pass: insert all
 	for _, t := range trades {
-		copy := *t
-		s.data[t.TradeID] = &copy
+		tradeCopy := *t
+		s.data[t.TradeID] = &tradeCopy
 	}
 
 	return nil
@@ -88,8 +88,8 @@ func (s *TradeRecordStore) GetByID(_ context.Context, tradeID string) (*domain.T
 		return nil, storage.ErrNotFound
 	}
 
-	copy := *t
-	return &copy, nil
+	tradeCopy := *t
+	return &tradeCopy, nil
 }
 
 // GetByCandidateID retrieves all trades for a candidate, ordered by entry_signal_time ASC.
@@ -100,8 +100,8 @@ func (s *TradeRecordStore) GetByCandidateID(_ context.Context, candidateID strin
 	var result []*domain.TradeRecord
 	for _, t := range s.data {
 		if t.CandidateID == candidateID {
-			copy := *t
-			result = append(result, &copy)
+			tradeCopy := *t
+			result = append(result, &tradeCopy)
 		}
 	}
 
@@ -120,8 +120,8 @@ func (s *TradeRecordStore) GetByStrategyScenario(_ context.Context, strategyID, 
 	var result []*domain.TradeRecord
 	for _, t := range s.data {
 		if t.StrategyID == strategyID && t.ScenarioID == scenarioID {
-			copy := *t
-			result = append(result, &copy)
+			tradeCopy := *t
+			result = append(result, &tradeCopy)
 		}
 	}
 
@@ -139,8 +139,8 @@ func (s *TradeRecordStore) GetAll(_ context.Context) ([]*domain.TradeRecord, err
 
 	result := make([]*domain.TradeRecord, 0, len(s.data))
 	for _, t := range s.data {
-		copy := *t
-		result = append(result, &copy)
+		tradeCopy := *t
+		result = append(result, &tradeCopy)
 	}
 
 	sort.Slice(result, func(i, j int) bool {

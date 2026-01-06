@@ -61,8 +61,8 @@ func (s *VolumeTimeseriesStore) InsertBulk(_ context.Context, points []*domain.V
 	// Second pass: insert all
 	for _, p := range points {
 		key := volumeKey(p.CandidateID, p.TimestampMs, p.IntervalSeconds)
-		copy := *p
-		s.data[key] = &copy
+		pointCopy := *p
+		s.data[key] = &pointCopy
 	}
 
 	return nil
@@ -76,8 +76,8 @@ func (s *VolumeTimeseriesStore) GetByCandidateID(_ context.Context, candidateID 
 	var result []*domain.VolumeTimeseriesPoint
 	for _, p := range s.data {
 		if p.CandidateID == candidateID {
-			copy := *p
-			result = append(result, &copy)
+			pointCopy := *p
+			result = append(result, &pointCopy)
 		}
 	}
 
@@ -99,8 +99,8 @@ func (s *VolumeTimeseriesStore) GetByTimeRange(_ context.Context, candidateID st
 	var result []*domain.VolumeTimeseriesPoint
 	for _, p := range s.data {
 		if p.CandidateID == candidateID && p.TimestampMs >= start && p.TimestampMs <= end {
-			copy := *p
-			result = append(result, &copy)
+			pointCopy := *p
+			result = append(result, &pointCopy)
 		}
 	}
 

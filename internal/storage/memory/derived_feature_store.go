@@ -61,8 +61,8 @@ func (s *DerivedFeatureStore) InsertBulk(_ context.Context, points []*domain.Der
 	// Second pass: insert all
 	for _, p := range points {
 		key := derivedFeatureKey(p.CandidateID, p.TimestampMs)
-		copy := *p
-		s.data[key] = &copy
+		featureCopy := *p
+		s.data[key] = &featureCopy
 	}
 
 	return nil
@@ -76,8 +76,8 @@ func (s *DerivedFeatureStore) GetByCandidateID(_ context.Context, candidateID st
 	var result []*domain.DerivedFeaturePoint
 	for _, p := range s.data {
 		if p.CandidateID == candidateID {
-			copy := *p
-			result = append(result, &copy)
+			featureCopy := *p
+			result = append(result, &featureCopy)
 		}
 	}
 
@@ -96,8 +96,8 @@ func (s *DerivedFeatureStore) GetByTimeRange(_ context.Context, candidateID stri
 	var result []*domain.DerivedFeaturePoint
 	for _, p := range s.data {
 		if p.CandidateID == candidateID && p.TimestampMs >= start && p.TimestampMs <= end {
-			copy := *p
-			result = append(result, &copy)
+			featureCopy := *p
+			result = append(result, &featureCopy)
 		}
 	}
 

@@ -43,8 +43,8 @@ func (s *LiquidityEventStore) Insert(_ context.Context, e *domain.LiquidityEvent
 		return storage.ErrDuplicateKey
 	}
 
-	copy := *e
-	s.data[key] = &copy
+	eventCopy := *e
+	s.data[key] = &eventCopy
 	return nil
 }
 
@@ -81,8 +81,8 @@ func (s *LiquidityEventStore) InsertBulk(_ context.Context, events []*domain.Liq
 	// Second pass: insert all
 	for _, e := range events {
 		key := liquidityEventKey(e.CandidateID, e.TxSignature, e.EventIndex)
-		copy := *e
-		s.data[key] = &copy
+		eventCopy := *e
+		s.data[key] = &eventCopy
 	}
 
 	return nil
@@ -96,8 +96,8 @@ func (s *LiquidityEventStore) GetByCandidateID(_ context.Context, candidateID st
 	var result []*domain.LiquidityEvent
 	for _, e := range s.data {
 		if e.CandidateID == candidateID {
-			copy := *e
-			result = append(result, &copy)
+			eventCopy := *e
+			result = append(result, &eventCopy)
 		}
 	}
 
@@ -119,8 +119,8 @@ func (s *LiquidityEventStore) GetByTimeRange(_ context.Context, candidateID stri
 	var result []*domain.LiquidityEvent
 	for _, e := range s.data {
 		if e.CandidateID == candidateID && e.Timestamp >= start && e.Timestamp <= end {
-			copy := *e
-			result = append(result, &copy)
+			eventCopy := *e
+			result = append(result, &eventCopy)
 		}
 	}
 

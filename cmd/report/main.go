@@ -69,15 +69,17 @@ func main() {
 	}
 
 	// Define implementable strategies
-	// TIME_EXIT is implementable (simple time-based exit)
-	// TRAILING_STOP and LIQUIDITY_GUARD require real-time price/liquidity feeds - not yet implementable
+	// All 3 strategies are now implementable via orchestrated pipeline:
+	// - TIME_EXIT: simple time-based exit
+	// - TRAILING_STOP: trailing stop based on price movement
+	// - LIQUIDITY_GUARD: exit on liquidity drop
 	implementable := map[decision.StrategyKey]bool{
 		{StrategyID: "TIME_EXIT", EntryEventType: "NEW_TOKEN"}:          true,
 		{StrategyID: "TIME_EXIT", EntryEventType: "ACTIVE_TOKEN"}:       true,
-		{StrategyID: "TRAILING_STOP", EntryEventType: "NEW_TOKEN"}:      false,
-		{StrategyID: "TRAILING_STOP", EntryEventType: "ACTIVE_TOKEN"}:   false,
-		{StrategyID: "LIQUIDITY_GUARD", EntryEventType: "NEW_TOKEN"}:    false,
-		{StrategyID: "LIQUIDITY_GUARD", EntryEventType: "ACTIVE_TOKEN"}: false,
+		{StrategyID: "TRAILING_STOP", EntryEventType: "NEW_TOKEN"}:      true,
+		{StrategyID: "TRAILING_STOP", EntryEventType: "ACTIVE_TOKEN"}:   true,
+		{StrategyID: "LIQUIDITY_GUARD", EntryEventType: "NEW_TOKEN"}:    true,
+		{StrategyID: "LIQUIDITY_GUARD", EntryEventType: "ACTIVE_TOKEN"}: true,
 	}
 
 	// Create replay runner for replayability check

@@ -51,8 +51,8 @@ func (s *SwapEventStore) Insert(_ context.Context, e *domain.SwapEvent) error {
 	}
 
 	// Store a copy
-	copy := *e
-	s.data = append(s.data, &copy)
+	eventCopy := *e
+	s.data = append(s.data, &eventCopy)
 	s.keys[key] = true
 
 	return nil
@@ -88,8 +88,8 @@ func (s *SwapEventStore) InsertBulk(_ context.Context, events []*domain.SwapEven
 
 	// Insert all
 	for _, e := range events {
-		copy := *e
-		s.data = append(s.data, &copy)
+		eventCopy := *e
+		s.data = append(s.data, &eventCopy)
 
 		key := swapEventKey{
 			Mint:        e.Mint,
@@ -110,8 +110,8 @@ func (s *SwapEventStore) GetByTimeRange(_ context.Context, start, end int64) ([]
 	var result []*domain.SwapEvent
 	for _, e := range s.data {
 		if e.Timestamp >= start && e.Timestamp < end {
-			copy := *e
-			result = append(result, &copy)
+			eventCopy := *e
+			result = append(result, &eventCopy)
 		}
 	}
 
@@ -129,8 +129,8 @@ func (s *SwapEventStore) GetByMintTimeRange(_ context.Context, mint string, star
 	var result []*domain.SwapEvent
 	for _, e := range s.data {
 		if e.Mint == mint && e.Timestamp >= start && e.Timestamp < end {
-			copy := *e
-			result = append(result, &copy)
+			eventCopy := *e
+			result = append(result, &eventCopy)
 		}
 	}
 

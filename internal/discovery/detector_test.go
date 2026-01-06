@@ -6,6 +6,7 @@ import (
 
 	"solana-token-lab/internal/domain"
 	"solana-token-lab/internal/idhash"
+	"solana-token-lab/internal/storage"
 	"solana-token-lab/internal/storage/memory"
 )
 
@@ -292,5 +293,154 @@ func TestSortSwapEvents(t *testing.T) {
 	}
 	if events[2].Slot != 200 {
 		t.Error("Third event should be slot 200")
+	}
+}
+
+// Tests for persistence functionality
+
+func TestDetector_WithProgressStore(t *testing.T) {
+	candidateStore := memory.NewCandidateStore()
+	progressStore := memory.NewDiscoveryProgressStore()
+	ctx := context.Background()
+
+	// Create detector with persistence
+	detector := NewDetector(candidateStore).WithProgressStore(progressStore)
+
+	// Process first event
+	event1 := &SwapEvent{
+		Mint:        "MintA",
+		TxSignature: "Tx1",
+		EventIndex:  0,
+		Slot:        100,
+		Timestamp:   1000,
+	}
+
+	candidate, err := detector.ProcessEvent(ctx, event1)
+	if err != nil {
+		t.Fatalf("ProcessEvent failed: %v", err)
+	}
+	if candidate == nil {
+		t.Fatal("Expected candidate to be created")
+	}
+
+	// Verify mint is persisted
+	seen, err := progressStore.IsMintSeen(ctx, "MintA")
+	if err != nil {
+		t.Fatalf("IsMintSeen failed: %v", err)
+	}
+	if !seen {
+		t.Error("Mint should be marked as seen in progress store")
+	}
+
+	// Save progress
+	if err := detector.SaveProgress(ctx, 100, "Tx1"); err != nil {
+		t.Fatalf("SaveProgress failed: %v", err)
+	}
+
+	// Verify progress is saved
+	progress, err := progressStore.GetLastProcessed(ctx)
+	if err != nil {
+		t.Fatalf("GetLastProcessed failed: %v", err)
+	}
+	if progress.Slot != 100 {
+		t.Errorf("Expected slot 100, got %d", progress.Slot)
+	}
+	if progress.Signature != "Tx1" {
+		t.Errorf("Expected signature Tx1, got %s", progress.Signature)
+	}
+}
+
+func TestDetector_LoadState_ResumesFromPersistence(t *testing.T) {
+	candidateStore := memory.NewCandidateStore()
+	progressStore := memory.NewDiscoveryProgressStore()
+	ctx := context.Background()
+
+	// Pre-populate progress store (simulating previous run)
+	_ = progressStore.MarkMintSeen(ctx, "SeenMint1")
+	_ = progressStore.MarkMintSeen(ctx, "SeenMint2")
+	_ = progressStore.SetLastProcessed(ctx, &storage.DiscoveryProgress{
+		Slot:      500,
+		Signature: "TxPrevious",
+	})
+
+	// Create new detector and load state
+	detector := NewDetector(candidateStore).WithProgressStore(progressStore)
+	if err := detector.LoadState(ctx); err != nil {
+		t.Fatalf("LoadState failed: %v", err)
+	}
+
+	// Verify in-memory cache is populated
+	if detector.SeenCount() != 2 {
+		t.Errorf("Expected 2 seen mints, got %d", detector.SeenCount())
+	}
+
+	// Processing an already-seen mint should return nil
+	event := &SwapEvent{
+		Mint:        "SeenMint1",
+		TxSignature: "TxNew",
+		EventIndex:  0,
+		Slot:        600,
+		Timestamp:   6000,
+	}
+
+	candidate, err := detector.ProcessEvent(ctx, event)
+	if err != nil {
+		t.Fatalf("ProcessEvent failed: %v", err)
+	}
+	if candidate != nil {
+		t.Error("Already-seen mint should not create new candidate")
+	}
+
+	// Check progress
+	progress, err := detector.GetProgress(ctx)
+	if err != nil {
+		t.Fatalf("GetProgress failed: %v", err)
+	}
+	if progress.Slot != 500 {
+		t.Errorf("Expected previous slot 500, got %d", progress.Slot)
+	}
+}
+
+func TestDetector_NoPersistence_Fallback(t *testing.T) {
+	candidateStore := memory.NewCandidateStore()
+	ctx := context.Background()
+
+	// Create detector WITHOUT persistence
+	detector := NewDetector(candidateStore)
+
+	// LoadState should be no-op
+	if err := detector.LoadState(ctx); err != nil {
+		t.Fatalf("LoadState should not fail without persistence: %v", err)
+	}
+
+	// SaveProgress should be no-op
+	if err := detector.SaveProgress(ctx, 100, "Tx1"); err != nil {
+		t.Fatalf("SaveProgress should not fail without persistence: %v", err)
+	}
+
+	// GetProgress should return nil
+	progress, err := detector.GetProgress(ctx)
+	if err != nil {
+		t.Fatalf("GetProgress should not fail without persistence: %v", err)
+	}
+	if progress != nil {
+		t.Error("GetProgress should return nil without persistence")
+	}
+
+	// ProcessEvent should still work
+	event := &SwapEvent{
+		Mint:        "MintA",
+		TxSignature: "Tx1",
+		EventIndex:  0,
+		Slot:        100,
+		Timestamp:   1000,
+	}
+
+	candidate, err := detector.ProcessEvent(ctx, event)
+	if err != nil {
+		t.Fatalf("ProcessEvent failed: %v", err)
+	}
+	if candidate == nil {
+		t.Fatal("Expected candidate to be created")
 	}
 }
