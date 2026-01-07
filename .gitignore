@@ -31,3 +31,6 @@ workflow/
 # IDE
 .idea/
 .vscode/
+
+# CI/CD (not used)
+.github/
