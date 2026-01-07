@@ -7,6 +7,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"solana-token-lab/internal/decision"
@@ -25,7 +27,18 @@ func main() {
 	verbose := flag.Bool("verbose", false, "Verbose output")
 	flag.Parse()
 
-	ctx := context.Background()
+	// Create context with cancellation for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Handle shutdown signals
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		fmt.Printf("\nReceived signal %v, cancelling pipeline...\n", sig)
+		cancel()
+	}()
 
 	// Create all memory stores
 	stores := createAllMemoryStores()

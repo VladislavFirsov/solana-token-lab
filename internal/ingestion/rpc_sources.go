@@ -375,9 +375,6 @@ func NewRPCMetadataSource(rpc *solana.HTTPClient) *RPCMetadataSource {
 // Metaplex Token Metadata program ID
 const metaplexProgramID = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
 
-// SPL Token program ID
-const splTokenProgramID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-
 // Fetch returns token metadata for a given mint address.
 // Fetches from both SPL Token Mint and Metaplex Metadata accounts.
 func (s *RPCMetadataSource) Fetch(ctx context.Context, mint string) (*domain.TokenMetadata, error) {

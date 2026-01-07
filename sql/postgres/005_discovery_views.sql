@@ -50,7 +50,7 @@ COMMENT ON VIEW v_new_token_candidates IS 'NEW_TOKEN candidates: first swap per 
 CREATE OR REPLACE VIEW v_active_token_spike_detection AS
 WITH
 -- Current timestamp for window calculations (use max timestamp from swaps)
-current_time AS (
+latest_time AS (
     SELECT MAX(timestamp) AS now_ms FROM swaps
 ),
 
@@ -72,7 +72,7 @@ hourly_stats AS (
         MAX(s.timestamp) AS last_timestamp
     FROM swaps s
     JOIN candidate_mints cm ON s.candidate_id = cm.candidate_id
-    CROSS JOIN current_time ct
+    CROSS JOIN latest_time ct
     WHERE s.timestamp >= ct.now_ms - 3600000  -- 1 hour in ms
       AND s.timestamp < ct.now_ms
     GROUP BY cm.mint
@@ -86,7 +86,7 @@ daily_stats AS (
         COUNT(*)::numeric / 24.0 AS swaps_24h_avg
     FROM swaps s
     JOIN candidate_mints cm ON s.candidate_id = cm.candidate_id
-    CROSS JOIN current_time ct
+    CROSS JOIN latest_time ct
     WHERE s.timestamp >= ct.now_ms - 86400000  -- 24 hours in ms
       AND s.timestamp < ct.now_ms
     GROUP BY cm.mint

@@ -1,6 +1,11 @@
 # Local workflow artifacts
 workflow/
 
+# Environment files (secrets)
+.env
+.env.local
+.env.*.local
+
 # OS
 .DS_Store
 
@@ -16,3 +21,13 @@ workflow/
 # Binaries
 /ingest
 /replay
+/pipeline
+/report
+/backtest
+
+# Output directory (reports, CSVs)
+/output/
+
+# IDE
+.idea/
+.vscode/

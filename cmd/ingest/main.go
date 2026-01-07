@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"solana-token-lab/internal/discovery"
 	"solana-token-lab/internal/ingestion"
+	"solana-token-lab/internal/observability"
 	"solana-token-lab/internal/solana"
 	"solana-token-lab/internal/storage"
 	"solana-token-lab/internal/storage/memory"
@@ -40,11 +42,28 @@ func main() {
 	dex := flag.String("dex", "raydium,pumpfun", "Comma-separated DEX aliases (raydium, pumpfun)")
 	checkInterval := flag.Duration("check-interval", 1*time.Hour, "ACTIVE_TOKEN detection interval")
 	useMemory := flag.Bool("use-memory", false, "Use in-memory storage instead of PostgreSQL")
+	metricsAddr := flag.String("metrics-addr", ":9090", "Prometheus metrics HTTP address (empty to disable)")
 
 	flag.Parse()
 
 	// Setup logger
 	logger := log.New(os.Stdout, "[ingest] ", log.LstdFlags|log.Lshortfile)
+
+	// Start metrics server if enabled
+	if *metricsAddr != "" {
+		go func() {
+			mux := http.NewServeMux()
+			mux.Handle("/metrics", observability.Handler())
+			mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("ok"))
+			})
+			logger.Printf("Starting metrics server on %s", *metricsAddr)
+			if err := http.ListenAndServe(*metricsAddr, mux); err != nil && err != http.ErrServerClosed {
+				logger.Printf("Metrics server error: %v", err)
+			}
+		}()
+	}
 
 	// Resolve DEX programs
 	programList := resolvePrograms(*programs, *dex)
@@ -55,15 +74,30 @@ func main() {
 
 	// Create context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
-	// Handle shutdown signals
+	// Handle shutdown signals with graceful timeout
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	// Channel to signal main goroutine completion
+	done := make(chan error, 1)
+
 	go func() {
 		sig := <-sigCh
-		logger.Printf("Received signal %v, shutting down...", sig)
+		logger.Printf("Received signal %v, initiating graceful shutdown...", sig)
 		cancel()
+
+		// Wait for second signal for immediate shutdown
+		select {
+		case sig := <-sigCh:
+			logger.Printf("Received second signal %v, forcing immediate shutdown", sig)
+			os.Exit(1)
+		case <-time.After(30 * time.Second):
+			logger.Println("Graceful shutdown timed out after 30s, forcing exit")
+			os.Exit(1)
+		case <-done:
+			// Normal shutdown completed
+		}
 	}()
 
 	// Run based on mode
@@ -78,6 +112,10 @@ func main() {
 	default:
 		logger.Fatalf("Unknown mode: %s", *mode)
 	}
+
+	// Signal completion to shutdown handler
+	done <- err
+	cancel()
 
 	if err != nil && err != context.Canceled {
 		logger.Fatalf("Error: %v", err)

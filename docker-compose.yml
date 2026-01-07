@@ -1,0 +1,136 @@
+version: '3.8'
+
+services:
+  # =============================================================================
+  # PostgreSQL - Primary data store (candidates, swaps, events, trades)
+  # =============================================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: solana-lab-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-solana}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-solana_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-solana_lab}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-solana} -d ${POSTGRES_DB:-solana_lab}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # =============================================================================
+  # ClickHouse - Analytics store (timeseries, derived features, aggregates)
+  # =============================================================================
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.1-alpine
+    container_name: solana-lab-clickhouse
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-solana_lab}
+    ports:
+      - "8123:8123"   # HTTP interface
+      - "9000:9000"   # Native TCP
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./sql/clickhouse:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # =============================================================================
+  # Ingestion Service - Collects data from Solana
+  # =============================================================================
+  ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: solana-lab-ingest
+    entrypoint: ["/app/ingest"]
+    command:
+      - --rpc-endpoint=${SOLANA_RPC_ENDPOINT}
+      - --ws-endpoint=${SOLANA_WS_ENDPOINT}
+      - --dex=raydium,pumpfun
+      - --postgres-dsn=postgres://${POSTGRES_USER:-solana}:${POSTGRES_PASSWORD:-solana_secret}@postgres:5432/${POSTGRES_DB:-solana_lab}?sslmode=disable
+      - --clickhouse-dsn=clickhouse://${CLICKHOUSE_USER:-default}:${CLICKHOUSE_PASSWORD:-}@clickhouse:9000/${CLICKHOUSE_DB:-solana_lab}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    environment:
+      - HELIUS_API_KEY=${HELIUS_API_KEY}
+    restart: unless-stopped
+    profiles:
+      - ingest
+
+  # =============================================================================
+  # Pipeline Service - Runs Phase1 analysis pipeline
+  # =============================================================================
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: solana-lab-pipeline
+    entrypoint: ["/app/pipeline"]
+    command:
+      - --postgres-dsn=postgres://${POSTGRES_USER:-solana}:${POSTGRES_PASSWORD:-solana_secret}@postgres:5432/${POSTGRES_DB:-solana_lab}?sslmode=disable
+      - --clickhouse-dsn=clickhouse://${CLICKHOUSE_USER:-default}:${CLICKHOUSE_PASSWORD:-}@clickhouse:9000/${CLICKHOUSE_DB:-solana_lab}
+      - --output-dir=/app/output
+    volumes:
+      - ./output:/app/output
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    profiles:
+      - pipeline
+
+  # =============================================================================
+  # Report Service - Generates reports from pipeline results
+  # =============================================================================
+  report:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: solana-lab-report
+    entrypoint: ["/app/report"]
+    command:
+      - --postgres-dsn=postgres://${POSTGRES_USER:-solana}:${POSTGRES_PASSWORD:-solana_secret}@postgres:5432/${POSTGRES_DB:-solana_lab}?sslmode=disable
+      - --clickhouse-dsn=clickhouse://${CLICKHOUSE_USER:-default}:${CLICKHOUSE_PASSWORD:-}@clickhouse:9000/${CLICKHOUSE_DB:-solana_lab}
+      - --output-dir=/app/output
+    volumes:
+      - ./output:/app/output
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    profiles:
+      - report
+
+  # =============================================================================
+  # Adminer - Database management UI (optional, for debugging)
+  # =============================================================================
+  adminer:
+    image: adminer:4
+    container_name: solana-lab-adminer
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+    profiles:
+      - dev
+
+volumes:
+  postgres_data:
+  clickhouse_data:
