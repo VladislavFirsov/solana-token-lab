@@ -168,12 +168,21 @@ func runLive(ctx context.Context, logger *log.Logger, rpcEndpoint, wsEndpoint, p
 	// Create RPC client
 	rpc := solana.NewHTTPClient(rpcEndpoint)
 
-	// Create WebSocket client
-	ws, err := solana.NewWSClient(ctx, wsEndpoint, nil)
+	// Create SEPARATE WebSocket clients for swap and liquidity
+	// This is required because Helius deduplicates subscriptions to the same program
+	// on the same connection, returning the same subscription ID which causes
+	// the second subscriber to overwrite the first one's channel
+	wsSwap, err := solana.NewWSClient(ctx, wsEndpoint, nil)
 	if err != nil {
-		return fmt.Errorf("create websocket client: %w", err)
+		return fmt.Errorf("create websocket client for swaps: %w", err)
 	}
-	defer ws.Close()
+	defer wsSwap.Close()
+
+	wsLiquidity, err := solana.NewWSClient(ctx, wsEndpoint, nil)
+	if err != nil {
+		return fmt.Errorf("create websocket client for liquidity: %w", err)
+	}
+	defer wsLiquidity.Close()
 
 	// Require --postgres-dsn unless --use-memory is explicitly set
 	if !useMemory && postgresDSN == "" {
@@ -199,9 +208,9 @@ func runLive(ctx context.Context, logger *log.Logger, rpcEndpoint, wsEndpoint, p
 		metadataStore = pgstore.NewTokenMetadataStore(pool)
 	}
 
-	// Create sources
-	wsSwapSource := ingestion.NewWSSwapEventSource(ws, rpc, programs)
-	wsLiquiditySource := ingestion.NewWSLiquidityEventSourceWithStore(ws, rpc, programs, candidateStore)
+	// Create sources with separate WebSocket clients
+	wsSwapSource := ingestion.NewWSSwapEventSource(wsSwap, rpc, programs)
+	wsLiquiditySource := ingestion.NewWSLiquidityEventSourceWithStore(wsLiquidity, rpc, programs, candidateStore)
 	metadataSource := ingestion.NewRPCMetadataSource(rpc)
 
 	// Create detectors

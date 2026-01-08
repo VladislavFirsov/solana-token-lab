@@ -168,15 +168,15 @@ func (c *WSClientImpl) SubscribeLogs(ctx context.Context, filter LogsFilter) (<-
 		return nil, fmt.Errorf("write subscribe: %w", err)
 	}
 
-	// Wait for subscription confirmation
+	// Wait for subscription confirmation (30s timeout for slow providers)
 	var subID int64
 	select {
 	case subID = <-confirmCh:
-	case <-time.After(10 * time.Second):
+	case <-time.After(30 * time.Second):
 		c.pendingSubsMu.Lock()
 		delete(c.pendingSubs, reqID)
 		c.pendingSubsMu.Unlock()
-		return nil, fmt.Errorf("subscription timeout")
+		return nil, fmt.Errorf("subscription timeout after 30s")
 	case <-c.done:
 		return nil, fmt.Errorf("client closed")
 	case <-ctx.Done():
@@ -425,11 +425,11 @@ func (c *WSClientImpl) subscribeLogsInternal(ctx context.Context, filter LogsFil
 	select {
 	case subID := <-confirmCh:
 		return subID, nil
-	case <-time.After(10 * time.Second):
+	case <-time.After(30 * time.Second):
 		c.pendingSubsMu.Lock()
 		delete(c.pendingSubs, reqID)
 		c.pendingSubsMu.Unlock()
-		return 0, fmt.Errorf("subscription timeout")
+		return 0, fmt.Errorf("subscription timeout after 30s")
 	case <-c.done:
 		return 0, fmt.Errorf("client closed")
 	case <-ctx.Done():
@@ -454,6 +454,20 @@ func (c *WSClientImpl) handleMessage(message []byte) {
 	if err := json.Unmarshal(message, &notif); err == nil && notif.Method == "logsNotification" {
 		c.handleLogsNotification(&notif)
 		return
+	}
+
+	// Check for error response
+	var errResp struct {
+		JSONRPC string `json:"jsonrpc"`
+		ID      uint64 `json:"id"`
+		Error   *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(message, &errResp); err == nil && errResp.Error != nil {
+		// Log error but don't crash - subscription will timeout
+		fmt.Printf("[ws] Error response: code=%d msg=%s\n", errResp.Error.Code, errResp.Error.Message)
 	}
 }
 

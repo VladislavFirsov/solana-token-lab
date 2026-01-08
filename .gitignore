@@ -24,6 +24,7 @@ workflow/
 /pipeline
 /report
 /backtest
+/server
 
 # Output directory (reports, CSVs)
 /output/
