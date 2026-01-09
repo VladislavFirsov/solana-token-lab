@@ -412,8 +412,10 @@ type PumpFunParser struct {
 	// Buy/Sell instruction patterns
 	buyPattern  *regexp.Regexp
 	sellPattern *regexp.Regexp
-	// Token mint pattern
+	// Token mint pattern (legacy, for logs that include mint=)
 	mintPattern *regexp.Regexp
+	// Base58 address pattern (32-44 chars alphanumeric, no 0OIl)
+	addressPattern *regexp.Regexp
 }
 
 // NewPumpFunParser creates a new pump.fun parser.
@@ -422,7 +424,15 @@ func NewPumpFunParser() *PumpFunParser {
 		buyPattern:  regexp.MustCompile(`Program log: Instruction: Buy`),
 		sellPattern: regexp.MustCompile(`Program log: Instruction: Sell`),
 		mintPattern: regexp.MustCompile(`mint=([A-Za-z0-9]+)`),
+		// Base58 address pattern: 32-44 alphanumeric chars (Solana addresses)
+		// Excludes 0, O, I, l (not used in base58)
+		addressPattern: regexp.MustCompile(`^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{32,44}$`),
 	}
+}
+
+// isValidBase58Address validates that a string is a valid Solana base58 address.
+func (p *PumpFunParser) isValidBase58Address(s string) bool {
+	return p.addressPattern.MatchString(s)
 }
 
 // ParseSwapEvents parses pump.fun swap events from logs.
@@ -484,6 +494,116 @@ func (p *PumpFunParser) ParseSwapEvents(logs []string, txSig string, slot int64,
 		if isBuy || isSell {
 			event := &SwapEvent{
 				Mint:        currentMint,
+				TxSignature: txSig,
+				EventIndex:  i,
+				Slot:        slot,
+				Timestamp:   timestamp,
+				AmountOut:   pendingAmount,
+			}
+
+			events = append(events, event)
+		}
+	}
+
+	return events
+}
+
+// ParseSwapEventsV2 parses pump.fun swap events using logs and account keys.
+// This enables extraction of mint from account keys when not present in logs.
+// Pump.fun account layout for buy/sell:
+// 0: Global config
+// 1: Fee recipient
+// 2: Token mint
+// 3: Bonding curve
+// 4: Associated bonding curve
+// 5: Associated user
+// 6: User
+// 7: System program
+// 8: Token program
+// 9: Rent (optional)
+// 10: Event authority
+// 11: Program
+func (p *PumpFunParser) ParseSwapEventsV2(logs []string, accountKeys []string, txSig string, slot int64, timestamp int64) []*SwapEvent {
+	var events []*SwapEvent
+	var currentMint string
+	var pendingAmount float64
+	inPumpFun := false
+
+	// Try to extract mint from account keys (index 2 is typically the token mint)
+	// We validate more strictly:
+	// 1. Must have at least 8 accounts (minimum for pump.fun instruction)
+	// 2. Account at index 7 or 8 should be token program (TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA)
+	// 3. Account at index 2 should be valid base58 address
+	var accountMint string
+	if len(accountKeys) >= 8 {
+		// Validate this looks like a pump.fun instruction by checking token program presence
+		tokenProgram := "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+		hasPumpFunLayout := false
+		for i := 7; i <= 8 && i < len(accountKeys); i++ {
+			if accountKeys[i] == tokenProgram {
+				hasPumpFunLayout = true
+				break
+			}
+		}
+
+		if hasPumpFunLayout {
+			candidate := accountKeys[2]
+			// Validate base58 address format (32-44 chars, proper base58 chars)
+			if p.isValidBase58Address(candidate) && candidate != WSOL && candidate != PumpFun {
+				accountMint = candidate
+			}
+		}
+	}
+
+	// Pattern to extract amount from pump.fun logs
+	amountPattern := regexp.MustCompile(`(?:amount|token_amount)[=:]?\s*(\d+)`)
+
+	for i, log := range logs {
+		// Detect pump.fun program invocation
+		if strings.Contains(log, "Program "+PumpFun+" invoke") {
+			inPumpFun = true
+			pendingAmount = 0
+			continue
+		}
+
+		// Detect program exit
+		if strings.Contains(log, "Program "+PumpFun+" success") ||
+			strings.Contains(log, "Program "+PumpFun+" failed") {
+			inPumpFun = false
+			currentMint = ""
+			pendingAmount = 0
+			continue
+		}
+
+		if !inPumpFun {
+			continue
+		}
+
+		// Look for mint in logs first (legacy format)
+		if mintMatch := p.mintPattern.FindStringSubmatch(log); mintMatch != nil {
+			currentMint = mintMatch[1]
+		}
+
+		// Try to extract token amount from logs
+		if amountMatch := amountPattern.FindStringSubmatch(log); amountMatch != nil {
+			if parsed, err := strconv.ParseUint(amountMatch[1], 10, 64); err == nil {
+				pendingAmount = float64(parsed)
+			}
+		}
+
+		// Check for buy/sell instructions
+		isBuy := p.buyPattern.MatchString(log)
+		isSell := p.sellPattern.MatchString(log)
+
+		if isBuy || isSell {
+			// Use currentMint from logs, or fall back to account-derived mint
+			mint := currentMint
+			if mint == "" {
+				mint = accountMint
+			}
+
+			event := &SwapEvent{
+				Mint:        mint,
 				TxSignature: txSig,
 				EventIndex:  i,
 				Slot:        slot,

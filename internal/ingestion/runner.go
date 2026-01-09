@@ -24,6 +24,7 @@ type Runner struct {
 	activeDetector    *discovery.ActiveTokenDetector
 	checkInterval     time.Duration // Interval for ACTIVE_TOKEN detection
 	slotLagWindow     int64         // Number of slots to buffer for ordering
+	flushInterval     time.Duration // Interval for periodic buffer flush
 	logger            *log.Logger
 
 	// Slot-based buffer for deterministic ordering
@@ -46,7 +47,8 @@ type RunnerOptions struct {
 	NewTokenDetector  *discovery.NewTokenDetector
 	ActiveDetector    *discovery.ActiveTokenDetector
 	CheckInterval     time.Duration
-	SlotLagWindow     int64 // Default: 5 slots - wait this many slots before processing
+	SlotLagWindow     int64         // Default: 5 slots - wait this many slots before processing
+	FlushInterval     time.Duration // Default: 5s - force flush buffered events periodically
 	Logger            *log.Logger
 }
 
@@ -60,6 +62,11 @@ func NewRunner(opts RunnerOptions) *Runner {
 	slotLagWindow := opts.SlotLagWindow
 	if slotLagWindow == 0 {
 		slotLagWindow = 5 // Wait 5 slots (~2 seconds) for ordering
+	}
+
+	flushInterval := opts.FlushInterval
+	if flushInterval == 0 {
+		flushInterval = 5 * time.Second // Force flush every 5 seconds
 	}
 
 	logger := opts.Logger
@@ -79,6 +86,7 @@ func NewRunner(opts RunnerOptions) *Runner {
 		activeDetector:    opts.ActiveDetector,
 		checkInterval:     checkInterval,
 		slotLagWindow:     slotLagWindow,
+		flushInterval:     flushInterval,
 		logger:            logger,
 		swapBuffer:        make(map[int64][]*domain.SwapEvent),
 		liquidityBuffer:   make(map[int64][]*domain.LiquidityEvent),
@@ -116,7 +124,12 @@ func (r *Runner) Run(ctx context.Context) error {
 	ticker := time.NewTicker(r.checkInterval)
 	defer ticker.Stop()
 
-	r.logger.Printf("Runner started, ACTIVE_TOKEN check interval: %v, slot lag window: %d", r.checkInterval, r.slotLagWindow)
+	// Start periodic flush ticker to ensure buffered events are processed
+	// even if no new higher slots arrive (safety net for slot buffering)
+	flushTicker := time.NewTicker(r.flushInterval)
+	defer flushTicker.Stop()
+
+	r.logger.Printf("Runner started, ACTIVE_TOKEN check interval: %v, slot lag window: %d, flush interval: %v", r.checkInterval, r.slotLagWindow, r.flushInterval)
 
 	for {
 		select {
@@ -139,6 +152,13 @@ func (r *Runner) Run(ctx context.Context) error {
 				return errors.New("liquidity events channel closed")
 			}
 			r.bufferLiquidityEvent(ctx, event)
+
+		case <-flushTicker.C:
+			// Periodic flush: process finalized slots (respects slotLagWindow)
+			// This ensures events are written even if no new slots arrive,
+			// while maintaining slot-ordering guarantees.
+			// flushAllSlots() is only used on shutdown when ordering no longer matters.
+			r.processFinalizedSlots(ctx)
 
 		case <-ticker.C:
 			r.runActiveTokenDetection(ctx)

@@ -192,8 +192,10 @@ func (s *WSSwapEventSource) processSwapNotification(ctx context.Context, eventsC
 func (s *WSSwapEventSource) sendSwapEvents(ctx context.Context, eventsCh chan<- *domain.SwapEvent, swapEvents []*discovery.SwapEvent) {
 	for _, se := range swapEvents {
 		if se.Mint == "" {
+			log.Printf("[ws-swap] SKIP: empty mint for tx %s (event_index=%d)", se.TxSignature, se.EventIndex)
 			continue
 		}
+		log.Printf("[ws-swap] SEND: mint=%s tx=%s", se.Mint, se.TxSignature)
 
 		event := &domain.SwapEvent{
 			Mint:        se.Mint,
