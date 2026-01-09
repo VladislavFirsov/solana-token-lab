@@ -29,6 +29,7 @@ import (
 	"solana-token-lab/internal/replay"
 	"solana-token-lab/internal/solana"
 	"solana-token-lab/internal/storage"
+	chstore "solana-token-lab/internal/storage/clickhouse"
 	"solana-token-lab/internal/storage/memory"
 	pgstore "solana-token-lab/internal/storage/postgres"
 )
@@ -44,6 +45,9 @@ type Server struct {
 	// Configuration
 	rpcEndpoint      string
 	wsEndpoint       string
+	postgresDSN      string
+	clickhouseDSN    string
+	useMemory        bool
 	programs         []string
 	outputDir        string
 	pipelineInterval time.Duration
@@ -93,6 +97,7 @@ func main() {
 	rpcEndpoint := flag.String("rpc-endpoint", os.Getenv("SOLANA_RPC_ENDPOINT"), "Solana RPC HTTP endpoint")
 	wsEndpoint := flag.String("ws-endpoint", os.Getenv("SOLANA_WS_ENDPOINT"), "Solana WebSocket endpoint")
 	postgresDSN := flag.String("postgres-dsn", os.Getenv("POSTGRES_DSN"), "PostgreSQL connection string")
+	clickhouseDSN := flag.String("clickhouse-dsn", os.Getenv("CLICKHOUSE_DSN"), "ClickHouse connection string")
 	programs := flag.String("programs", "", "Comma-separated DEX program IDs to monitor")
 	dex := flag.String("dex", "raydium,pumpfun", "Comma-separated DEX aliases (raydium, pumpfun)")
 	outputDir := flag.String("output-dir", "output", "Output directory for reports")
@@ -114,8 +119,8 @@ func main() {
 	if *wsEndpoint == "" {
 		logger.Fatal("--ws-endpoint is required")
 	}
-	if !*useMemory && *postgresDSN == "" {
-		logger.Fatal("--postgres-dsn is required (use --use-memory for in-memory storage)")
+	if !*useMemory && (*postgresDSN == "" || *clickhouseDSN == "") {
+		logger.Fatal("--postgres-dsn and --clickhouse-dsn are required (use --use-memory for in-memory storage)")
 	}
 
 	// Resolve DEX programs
@@ -129,7 +134,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Create stores
-	stores, cleanup, err := createStores(ctx, *postgresDSN, *useMemory)
+	stores, cleanup, err := createStores(ctx, *postgresDSN, *clickhouseDSN, *useMemory)
 	if err != nil {
 		logger.Fatalf("Failed to create stores: %v", err)
 	}
@@ -139,6 +144,9 @@ func main() {
 	server := &Server{
 		rpcEndpoint:      *rpcEndpoint,
 		wsEndpoint:       *wsEndpoint,
+		postgresDSN:      *postgresDSN,
+		clickhouseDSN:    *clickhouseDSN,
+		useMemory:        *useMemory,
 		programs:         programList,
 		outputDir:        *outputDir,
 		pipelineInterval: *pipelineInterval,
@@ -221,7 +229,7 @@ func resolvePrograms(programs, dex string) []string {
 }
 
 // createStores creates all required stores.
-func createStores(ctx context.Context, postgresDSN string, useMemory bool) (*allStores, func(), error) {
+func createStores(ctx context.Context, postgresDSN, clickhouseDSN string, useMemory bool) (*allStores, func(), error) {
 	if useMemory {
 		stores := &allStores{
 			candidateStore:           memory.NewCandidateStore(),
@@ -245,21 +253,36 @@ func createStores(ctx context.Context, postgresDSN string, useMemory bool) (*all
 		return nil, nil, fmt.Errorf("connect to postgres: %w", err)
 	}
 
-	stores := &allStores{
-		candidateStore:           pgstore.NewCandidateStore(pool),
-		swapStore:                pgstore.NewSwapStore(pool),
-		swapEventStore:           pgstore.NewSwapEventStore(pool),
-		liquidityEventStore:      pgstore.NewLiquidityEventStore(pool),
-		priceTimeseriesStore:     memory.NewPriceTimeseriesStore(),     // ClickHouse not implemented yet
-		liquidityTimeseriesStore: memory.NewLiquidityTimeseriesStore(), // ClickHouse not implemented yet
-		volumeTimeseriesStore:    memory.NewVolumeTimeseriesStore(),    // ClickHouse not implemented yet
-		derivedFeatureStore:      memory.NewDerivedFeatureStore(),      // ClickHouse not implemented yet
-		tradeRecordStore:         pgstore.NewTradeRecordStore(pool),
-		strategyAggregateStore:   memory.NewStrategyAggregateStore(), // ClickHouse not implemented yet
-		metadataStore:            pgstore.NewTokenMetadataStore(pool),
+	// ClickHouse
+	chConn, err := chstore.NewConn(ctx, clickhouseDSN)
+	if err != nil {
+		pool.Close()
+		return nil, nil, fmt.Errorf("connect to clickhouse: %w", err)
 	}
 
-	return stores, func() { pool.Close() }, nil
+	stores := &allStores{
+		// PostgreSQL stores (source data + trade_records)
+		candidateStore:      pgstore.NewCandidateStore(pool),
+		swapStore:           pgstore.NewSwapStore(pool),
+		swapEventStore:      pgstore.NewSwapEventStore(pool),
+		liquidityEventStore: pgstore.NewLiquidityEventStore(pool),
+		tradeRecordStore:    pgstore.NewTradeRecordStore(pool),
+		metadataStore:       pgstore.NewTokenMetadataStore(pool),
+
+		// ClickHouse stores (analytics)
+		priceTimeseriesStore:     chstore.NewPriceTimeseriesStore(chConn),
+		liquidityTimeseriesStore: chstore.NewLiquidityTimeseriesStore(chConn),
+		volumeTimeseriesStore:    chstore.NewVolumeTimeseriesStore(chConn),
+		derivedFeatureStore:      chstore.NewDerivedFeatureStore(chConn),
+		strategyAggregateStore:   chstore.NewStrategyAggregateStore(chConn),
+	}
+
+	cleanup := func() {
+		chConn.Close()
+		pool.Close()
+	}
+
+	return stores, cleanup, nil
 }
 
 // Run starts the unified server with all components.
@@ -520,7 +543,15 @@ func (s *Server) runReport(ctx context.Context) {
 		s.stores.swapStore,
 		s.stores.liquidityEventStore,
 		replayRunner,
-	).WithAggregator(aggregator).WithDataSource("unified-server")
+	).WithAggregator(aggregator)
+
+	// Set data source based on mode
+	if s.useMemory {
+		p = p.WithDataSource("unified-server")
+	} else {
+		p = p.WithDBSource(s.postgresDSN, s.clickhouseDSN).
+			WithRawDataStores(s.stores.candidateStore, s.stores.priceTimeseriesStore, s.stores.liquidityTimeseriesStore)
+	}
 
 	// Run reporting pipeline
 	if err := p.Run(ctx); err != nil {
