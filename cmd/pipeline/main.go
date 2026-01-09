@@ -1,5 +1,9 @@
 // Package main provides E2E pipeline entry point.
 // Executes: normalization → simulation → metrics → reporting
+//
+// Supports two modes:
+// - Production: reads from PostgreSQL, writes to ClickHouse (default)
+// - Fixtures: uses in-memory stores with demo data (--use-fixtures)
 package main
 
 import (
@@ -18,14 +22,28 @@ import (
 	"solana-token-lab/internal/pipeline"
 	"solana-token-lab/internal/replay"
 	"solana-token-lab/internal/storage"
+	"solana-token-lab/internal/storage/clickhouse"
 	"solana-token-lab/internal/storage/memory"
+	"solana-token-lab/internal/storage/postgres"
 )
 
 func main() {
 	// Parse flags
 	outputDir := flag.String("output-dir", "docs", "Output directory for generated files")
 	verbose := flag.Bool("verbose", false, "Verbose output")
+	postgresDSN := flag.String("postgres-dsn", "", "PostgreSQL connection string")
+	clickhouseDSN := flag.String("clickhouse-dsn", "", "ClickHouse connection string")
+	useFixtures := flag.Bool("use-fixtures", false, "Use in-memory fixtures (demo mode)")
 	flag.Parse()
+
+	// Validate flags
+	if !*useFixtures {
+		if *postgresDSN == "" || *clickhouseDSN == "" {
+			fmt.Fprintln(os.Stderr, "Error: --postgres-dsn and --clickhouse-dsn are required unless --use-fixtures is set")
+			flag.Usage()
+			os.Exit(1)
+		}
+	}
 
 	// Create context with cancellation for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -40,13 +58,20 @@ func main() {
 		cancel()
 	}()
 
-	// Create all memory stores
-	stores := createAllMemoryStores()
-
-	// Load fixture data for candidates and raw events
-	if err := loadFixtureData(ctx, stores); err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading fixtures: %v\n", err)
+	// Create stores based on mode
+	stores, cleanup, err := createStores(ctx, *postgresDSN, *clickhouseDSN, *useFixtures)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating stores: %v\n", err)
 		os.Exit(1)
+	}
+	defer cleanup()
+
+	// Load fixture data only in fixtures mode
+	if *useFixtures {
+		if err := loadFixtureData(ctx, stores); err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading fixtures: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	// Create strategy and scenario configs
@@ -55,6 +80,12 @@ func main() {
 
 	// Phase 1-4: Run orchestrator (normalization → simulation → metrics)
 	fmt.Println("=== E2E Pipeline ===")
+	if *useFixtures {
+		fmt.Println("Mode: FIXTURES (in-memory demo data)")
+	} else {
+		fmt.Println("Mode: PRODUCTION (PostgreSQL + ClickHouse)")
+	}
+
 	orch := orchestrator.New(orchestrator.Options{
 		CandidateStore:           stores.candidateStore,
 		SwapStore:                stores.swapStore,
@@ -124,7 +155,15 @@ func main() {
 		stores.swapStore,
 		stores.liquidityEventStore,
 		replayRunner,
-	).WithAggregator(aggregator).WithClock(func() time.Time { return fixedTime }).WithDataSource("e2e-pipeline")
+	).WithAggregator(aggregator).WithClock(func() time.Time { return fixedTime })
+
+	// Set data source based on mode
+	if *useFixtures {
+		p = p.WithDataSource("fixtures")
+	} else {
+		p = p.WithDBSource(*postgresDSN, *clickhouseDSN).
+			WithRawDataStores(stores.candidateStore, stores.priceTimeseriesStore, stores.liquidityTimeseriesStore)
+	}
 
 	// Run reporting pipeline
 	if err := p.Run(ctx); err != nil {
@@ -140,7 +179,7 @@ func main() {
 	fmt.Printf("  - %s/DECISION_GATE_REPORT.md\n", *outputDir)
 }
 
-// allStores holds all memory stores.
+// allStores holds all stores required by the pipeline.
 type allStores struct {
 	candidateStore           storage.CandidateStore
 	swapStore                storage.SwapStore
@@ -153,8 +192,18 @@ type allStores struct {
 	strategyAggregateStore   storage.StrategyAggregateStore
 }
 
-// createAllMemoryStores creates all required memory stores.
-func createAllMemoryStores() *allStores {
+// createStores creates all required stores based on mode.
+// Returns stores, cleanup function, and error.
+func createStores(ctx context.Context, postgresDSN, clickhouseDSN string, useFixtures bool) (*allStores, func(), error) {
+	if useFixtures {
+		return createMemoryStores(), func() {}, nil
+	}
+
+	return createDBStores(ctx, postgresDSN, clickhouseDSN)
+}
+
+// createMemoryStores creates all in-memory stores for fixtures mode.
+func createMemoryStores() *allStores {
 	return &allStores{
 		candidateStore:           memory.NewCandidateStore(),
 		swapStore:                memory.NewSwapStore(),
@@ -168,7 +217,46 @@ func createAllMemoryStores() *allStores {
 	}
 }
 
-// loadFixtureData loads fixture data into stores.
+// createDBStores creates stores backed by PostgreSQL and ClickHouse.
+func createDBStores(ctx context.Context, postgresDSN, clickhouseDSN string) (*allStores, func(), error) {
+	// Connect to PostgreSQL
+	pgPool, err := postgres.NewPool(ctx, postgresDSN)
+	if err != nil {
+		return nil, nil, fmt.Errorf("connect to postgres: %w", err)
+	}
+
+	// Connect to ClickHouse
+	chConn, err := clickhouse.NewConn(ctx, clickhouseDSN)
+	if err != nil {
+		pgPool.Close()
+		return nil, nil, fmt.Errorf("connect to clickhouse: %w", err)
+	}
+
+	// Cleanup function
+	cleanup := func() {
+		chConn.Close()
+		pgPool.Close()
+	}
+
+	stores := &allStores{
+		// PostgreSQL stores (source data + trade_records)
+		candidateStore:      postgres.NewCandidateStore(pgPool),
+		swapStore:           postgres.NewSwapStore(pgPool),
+		liquidityEventStore: postgres.NewLiquidityEventStore(pgPool),
+		tradeRecordStore:    postgres.NewTradeRecordStore(pgPool),
+
+		// ClickHouse stores (derived data)
+		priceTimeseriesStore:     clickhouse.NewPriceTimeseriesStore(chConn),
+		liquidityTimeseriesStore: clickhouse.NewLiquidityTimeseriesStore(chConn),
+		volumeTimeseriesStore:    clickhouse.NewVolumeTimeseriesStore(chConn),
+		derivedFeatureStore:      clickhouse.NewDerivedFeatureStore(chConn),
+		strategyAggregateStore:   clickhouse.NewStrategyAggregateStore(chConn),
+	}
+
+	return stores, cleanup, nil
+}
+
+// loadFixtureData loads fixture data into stores (only for fixtures mode).
 func loadFixtureData(ctx context.Context, stores *allStores) error {
 	// Load candidates only (trades will be generated fresh by orchestrator simulation)
 	if err := pipeline.LoadCandidatesOnly(ctx, stores.candidateStore); err != nil {
