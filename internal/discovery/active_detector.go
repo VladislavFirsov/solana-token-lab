@@ -132,12 +132,9 @@ func (d *ActiveTokenDetector) EvaluateMint(ctx context.Context, mint string, eva
 	volumeSpike, swapsSpike, triggerSwap := d.checkSwapSpikes(swaps24h, start1h, evalTimestamp)
 
 	// Check liquidity spike if liquidity store is available
-	// Note: For pre-candidate detection, we pass empty candidateID.
-	// checkLiquiditySpike will return false since it can't query by mint.
 	liquiditySpike, liqTrigger := false, (*domain.LiquidityEvent)(nil)
 	if d.liquidityEventStore != nil {
-		// Pass empty candidateID - liquidity check requires GetByMint which isn't available
-		liquiditySpike, liqTrigger, err = d.checkLiquiditySpike(ctx, "", start24h, start1h, evalTimestamp)
+		liquiditySpike, liqTrigger, err = d.checkLiquiditySpike(ctx, mint, start24h, start1h, evalTimestamp)
 		if err != nil {
 			return nil, err
 		}
@@ -257,18 +254,14 @@ func (d *ActiveTokenDetector) findTriggerSwap(swaps24h []*domain.SwapEvent, star
 
 // checkLiquiditySpike evaluates liquidity changes for spike detection.
 // Returns (liquiditySpike, triggerEvent, error).
-// Note: This requires candidateID to query events. For pre-candidate detection,
-// we'd need GetByMint method which isn't in the current interface.
-// For now, this returns false when used for ACTIVE_TOKEN detection.
-func (d *ActiveTokenDetector) checkLiquiditySpike(ctx context.Context, candidateID string, start24h, start1h, evalTimestamp int64) (bool, *domain.LiquidityEvent, error) {
-	if candidateID == "" {
-		// Cannot check liquidity without candidateID
-		// This is expected for ACTIVE_TOKEN detection before candidate exists
+// Uses mint to query events for pre-candidate detection (ACTIVE_TOKEN discovery).
+func (d *ActiveTokenDetector) checkLiquiditySpike(ctx context.Context, mint string, start24h, start1h, evalTimestamp int64) (bool, *domain.LiquidityEvent, error) {
+	if mint == "" {
 		return false, nil, nil
 	}
 
-	// Get liquidity events for 24h window
-	events, err := d.liquidityEventStore.GetByTimeRange(ctx, candidateID, start24h, evalTimestamp)
+	// Get liquidity events for 24h window by mint
+	events, err := d.liquidityEventStore.GetByMintTimeRange(ctx, mint, start24h, evalTimestamp)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			return false, nil, nil

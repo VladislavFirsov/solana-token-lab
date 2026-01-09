@@ -89,9 +89,9 @@ func computeFromTrades(trades []*domain.TradeRecord, entryEventType string) *dom
 }
 
 // computeTokenWinRate calculates token-level win rate.
-// Groups trades by CandidateID, checks if at least one trade has positive outcome,
-// returns (totalTokens, tokensWithPositiveOutcome / totalTokens).
-// Per MVP_CRITERIA.md: a token is considered "winning" if it has at least one positive outcome.
+// Groups trades by CandidateID, computes mean outcome per token,
+// returns (totalTokens, tokensWithPositiveMeanOutcome / totalTokens).
+// Per domain/strategy.go: a token is considered "winning" if it has positive mean outcome.
 func computeTokenWinRate(trades []*domain.TradeRecord) (int, float64) {
 	if len(trades) == 0 {
 		return 0, 0
@@ -104,23 +104,21 @@ func computeTokenWinRate(trades []*domain.TradeRecord) (int, float64) {
 	}
 
 	totalTokens := len(candidateOutcomes)
-	tokensWithPositiveOutcome := 0
+	tokensWithPositiveMeanOutcome := 0
 
 	for _, outcomes := range candidateOutcomes {
-		// Check if at least one outcome is positive (not mean)
-		hasPositive := false
+		// Compute mean outcome for this token
+		sum := 0.0
 		for _, outcome := range outcomes {
-			if outcome > 0 {
-				hasPositive = true
-				break
-			}
+			sum += outcome
 		}
-		if hasPositive {
-			tokensWithPositiveOutcome++
+		meanOutcome := sum / float64(len(outcomes))
+		if meanOutcome > 0 {
+			tokensWithPositiveMeanOutcome++
 		}
 	}
 
-	return totalTokens, float64(tokensWithPositiveOutcome) / float64(totalTokens)
+	return totalTokens, float64(tokensWithPositiveMeanOutcome) / float64(totalTokens)
 }
 
 // computeWinRate calculates win rate as wins / total.

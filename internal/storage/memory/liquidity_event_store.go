@@ -134,4 +134,28 @@ func (s *LiquidityEventStore) GetByTimeRange(_ context.Context, candidateID stri
 	return result, nil
 }
 
+// GetByMintTimeRange retrieves events by mint within [start, end) (end exclusive).
+// Used for pre-candidate spike detection (ACTIVE_TOKEN discovery).
+func (s *LiquidityEventStore) GetByMintTimeRange(_ context.Context, mint string, start, end int64) ([]*domain.LiquidityEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var result []*domain.LiquidityEvent
+	for _, e := range s.data {
+		if e.Mint == mint && e.Timestamp >= start && e.Timestamp < end {
+			eventCopy := *e
+			result = append(result, &eventCopy)
+		}
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Timestamp != result[j].Timestamp {
+			return result[i].Timestamp < result[j].Timestamp
+		}
+		return result[i].Slot < result[j].Slot
+	})
+
+	return result, nil
+}
+
 var _ storage.LiquidityEventStore = (*LiquidityEventStore)(nil)

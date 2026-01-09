@@ -8,7 +8,7 @@ This document defines deterministic formulas for all required metrics used in Ph
 
 ## 1. Core Metrics
 
-### 1.1 Win Rate
+### 1.1 Win Rate (Trade-Level)
 
 ```
 win_rate = wins / total_trades
@@ -21,7 +21,37 @@ Result: decimal [0.0, 1.0]
 Display: percentage (e.g., 0.05 → "5%")
 ```
 
-### 1.2 Mean Outcome
+### 1.2 Token Win Rate (Token-Level)
+
+```
+token_win_rate = tokens_with_positive_mean / total_tokens
+
+WHERE:
+  -- Group trades by candidate_id (token)
+  -- For each token, compute mean_outcome = SUM(outcomes) / COUNT(trades)
+  -- Token is "winning" if mean_outcome > 0
+
+  tokens_with_positive_mean = COUNT(tokens WHERE mean_outcome > 0)
+  total_tokens = COUNT(DISTINCT candidate_id)
+
+Result: decimal [0.0, 1.0]
+Display: percentage (e.g., 0.05 → "5%")
+
+Example:
+  Token A: trades with outcomes [-5%, -3%, +1%]
+    mean_outcome = (-5 + -3 + 1) / 3 = -2.33%
+    NOT counted as winning (mean <= 0)
+
+  Token B: trades with outcomes [-2%, +5%, +3%]
+    mean_outcome = (-2 + 5 + 3) / 3 = +2.0%
+    Counted as winning (mean > 0)
+
+Note: This differs from trade-level win_rate. Token win rate
+measures profitability at the token level, not individual trades.
+Used in GO/NO-GO criterion: token_win_rate >= 5%.
+```
+
+### 1.3 Mean Outcome
 
 ```
 mean_outcome = SUM(outcome) / total_trades
@@ -33,7 +63,7 @@ WHERE:
 Result: decimal (can be negative)
 ```
 
-### 1.3 Median Outcome
+### 1.4 Median Outcome
 
 ```
 median_outcome = PERCENTILE(outcome, 0.50)
@@ -46,7 +76,7 @@ WHERE:
 Result: decimal (can be negative)
 ```
 
-### 1.4 Quantile Distribution
+### 1.5 Quantile Distribution
 
 ```
 p10 = PERCENTILE(outcome, 0.10)
@@ -68,7 +98,7 @@ PERCENTILE(values, p):
 Result: decimal array
 ```
 
-### 1.5 Standard Deviation
+### 1.6 Standard Deviation
 
 ```
 stddev = SQRT(SUM((outcome - mean)^2) / (total_trades - 1))
@@ -82,7 +112,7 @@ Result: decimal >= 0
 Edge case: if total_trades <= 1, stddev = 0
 ```
 
-### 1.6 Outcome Extremes
+### 1.7 Outcome Extremes
 
 ```
 outcome_min = MIN(outcome)

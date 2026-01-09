@@ -52,6 +52,10 @@ type LiquidityEventStore interface {
 
 	// GetByTimeRange retrieves events for a candidate within [start, end] (inclusive).
 	GetByTimeRange(ctx context.Context, candidateID string, start, end int64) ([]*domain.LiquidityEvent, error)
+
+	// GetByMintTimeRange retrieves events by mint within [start, end) (end exclusive).
+	// Used for pre-candidate spike detection (ACTIVE_TOKEN discovery).
+	GetByMintTimeRange(ctx context.Context, mint string, start, end int64) ([]*domain.LiquidityEvent, error)
 }
 
 // TokenMetadataStore provides access to token_metadata storage.

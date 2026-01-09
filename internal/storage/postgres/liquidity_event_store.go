@@ -160,6 +160,25 @@ func (s *LiquidityEventStore) GetByTimeRange(ctx context.Context, candidateID st
 	return scanLiquidityEvents(rows)
 }
 
+// GetByMintTimeRange retrieves events by mint within [start, end) (end exclusive).
+// Used for pre-candidate spike detection (ACTIVE_TOKEN discovery).
+func (s *LiquidityEventStore) GetByMintTimeRange(ctx context.Context, mint string, start, end int64) ([]*domain.LiquidityEvent, error) {
+	query := `
+		SELECT id, candidate_id, tx_signature, event_index, slot, timestamp, event_type, amount_token, amount_quote, liquidity_after, created_at, pool, mint
+		FROM liquidity_events
+		WHERE mint = $1 AND timestamp >= $2 AND timestamp < $3
+		ORDER BY timestamp ASC, id ASC
+	`
+
+	rows, err := s.pool.Query(ctx, query, mint, start, end)
+	if err != nil {
+		return nil, fmt.Errorf("get liquidity events by mint time range: %w", err)
+	}
+	defer rows.Close()
+
+	return scanLiquidityEvents(rows)
+}
+
 // scanLiquidityEvents scans multiple rows into a slice of LiquidityEvent.
 func scanLiquidityEvents(rows pgx.Rows) ([]*domain.LiquidityEvent, error) {
 	var events []*domain.LiquidityEvent

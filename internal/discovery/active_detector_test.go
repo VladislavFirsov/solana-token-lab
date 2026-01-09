@@ -503,3 +503,152 @@ func TestActiveDetector_PartialHistory_TrueSpike(t *testing.T) {
 		t.Errorf("Expected source ACTIVE_TOKEN, got %s", candidates[0].Source)
 	}
 }
+
+func TestActiveDetector_LiquiditySpikeTriggered(t *testing.T) {
+	swapEventStore := memory.NewSwapEventStore()
+	candidateStore := memory.NewCandidateStore()
+	liquidityEventStore := memory.NewLiquidityEventStore()
+	ctx := context.Background()
+
+	// Setup: 24h window with low liquidity changes, 1h window with high liquidity change
+	// liq_24h_avg = 240 / 24 = 10 per hour
+	// liq_1h = 50 (needs to be > 2.0 * 10 = 20)
+
+	evalTime := int64(86400000) // 24h mark
+	mint := "MintLiqSpike"
+
+	// Need some swaps to discover the mint in GetDistinctMintsByTimeRange
+	for i := 0; i < 24; i++ {
+		ts := int64(i * 3600000)
+		_ = swapEventStore.Insert(ctx, &domain.SwapEvent{
+			Mint:        mint,
+			TxSignature: "swaptx" + string(rune('a'+i)),
+			EventIndex:  0,
+			Slot:        int64(100 + i),
+			Timestamp:   ts,
+			AmountOut:   1.0, // low volume - no swap spike
+		})
+	}
+
+	// Add liquidity events distributed over 24h (low changes per hour)
+	for i := 0; i < 24; i++ {
+		ts := int64(i * 3600000)
+		// Use unique candidateID to allow insert (memory store requires non-empty candidateID)
+		_ = liquidityEventStore.Insert(ctx, &domain.LiquidityEvent{
+			CandidateID: "dummy_" + string(rune('a'+i)), // dummy for storage
+			Mint:        mint,
+			Pool:        "PoolLiq",
+			TxSignature: "liqtx" + string(rune('a'+i)),
+			EventIndex:  0,
+			Slot:        int64(100 + i),
+			Timestamp:   ts,
+			EventType:   domain.LiquidityEventAdd,
+			AmountQuote: 10.0, // low liquidity change
+		})
+	}
+
+	// Add high liquidity event in last hour
+	_ = liquidityEventStore.Insert(ctx, &domain.LiquidityEvent{
+		CandidateID: "dummy_spike",
+		Mint:        mint,
+		Pool:        "PoolLiq",
+		TxSignature: "liqTxSpike",
+		EventIndex:  0,
+		Slot:        200,
+		Timestamp:   evalTime - 1000, // 1 second before eval
+		EventType:   domain.LiquidityEventAdd,
+		AmountQuote: 50.0, // high liquidity spike
+	})
+
+	config := DefaultActiveConfig()
+	detector := NewActiveDetector(config, swapEventStore, candidateStore).
+		WithLiquidityStore(liquidityEventStore)
+
+	candidates, err := detector.DetectAt(ctx, evalTime)
+	if err != nil {
+		t.Fatalf("DetectAt failed: %v", err)
+	}
+
+	if len(candidates) != 1 {
+		t.Fatalf("Expected 1 candidate (liquidity spike), got %d", len(candidates))
+	}
+
+	if candidates[0].Source != domain.SourceActiveToken {
+		t.Errorf("Expected source ACTIVE_TOKEN, got %s", candidates[0].Source)
+	}
+	if candidates[0].Mint != mint {
+		t.Errorf("Expected mint %s, got %s", mint, candidates[0].Mint)
+	}
+}
+
+func TestActiveDetector_LiquiditySpikeWithMint_NoCandidateID(t *testing.T) {
+	// This test verifies the fix for Task 47:
+	// Liquidity spike detection must work using mint, not candidateID,
+	// because candidates don't exist yet during ACTIVE_TOKEN discovery.
+
+	swapEventStore := memory.NewSwapEventStore()
+	candidateStore := memory.NewCandidateStore()
+	liquidityEventStore := memory.NewLiquidityEventStore()
+	ctx := context.Background()
+
+	evalTime := int64(86400000)
+	mint := "MintNoCandidateYet"
+
+	// Add a swap to discover the mint
+	_ = swapEventStore.Insert(ctx, &domain.SwapEvent{
+		Mint:        mint,
+		TxSignature: "swaptx1",
+		EventIndex:  0,
+		Slot:        100,
+		Timestamp:   evalTime - 2*3600000, // 2 hours ago
+		AmountOut:   1.0,
+	})
+
+	// Add liquidity events with mint set (but candidateID is a placeholder)
+	// The key point: GetByMintTimeRange queries by mint, not candidateID
+	for i := 0; i < 4; i++ {
+		ts := evalTime - int64((4-i)*3600000)
+		_ = liquidityEventStore.Insert(ctx, &domain.LiquidityEvent{
+			CandidateID: "placeholder_" + string(rune('a'+i)), // not the real candidate
+			Mint:        mint,                                 // this is what we query by
+			Pool:        "Pool1",
+			TxSignature: "liqtx" + string(rune('a'+i)),
+			EventIndex:  0,
+			Slot:        int64(100 + i),
+			Timestamp:   ts,
+			EventType:   domain.LiquidityEventAdd,
+			AmountQuote: 10.0,
+		})
+	}
+
+	// Add spike in last hour
+	_ = liquidityEventStore.Insert(ctx, &domain.LiquidityEvent{
+		CandidateID: "placeholder_spike",
+		Mint:        mint,
+		Pool:        "Pool1",
+		TxSignature: "liqTxSpike",
+		EventIndex:  0,
+		Slot:        200,
+		Timestamp:   evalTime - 500,
+		EventType:   domain.LiquidityEventAdd,
+		AmountQuote: 100.0, // spike
+	})
+
+	config := DefaultActiveConfig()
+	detector := NewActiveDetector(config, swapEventStore, candidateStore).
+		WithLiquidityStore(liquidityEventStore)
+
+	// EvaluateMint should find liquidity events by mint and detect spike
+	candidate, err := detector.EvaluateMint(ctx, mint, evalTime)
+	if err != nil {
+		t.Fatalf("EvaluateMint failed: %v", err)
+	}
+
+	if candidate == nil {
+		t.Fatal("Expected candidate to be created (liquidity spike detected via mint)")
+	}
+
+	if candidate.Mint != mint {
+		t.Errorf("Expected mint %s, got %s", mint, candidate.Mint)
+	}
+}
