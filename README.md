@@ -21,7 +21,6 @@ cp .env.example .env
 
 # Start databases
 make up
-
 ```
 
 ### 3. Run Ingestion (collect data)
@@ -33,6 +32,8 @@ make up-ingest
 # Option B: Run locally
 make ingest
 ```
+
+Migrations run automatically on service startup. Manual `make migrate` is optional for troubleshooting.
 
 ### 4. Generate Reports (after 7+ days of data)
 

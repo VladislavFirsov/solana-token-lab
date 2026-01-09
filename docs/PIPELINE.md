@@ -51,6 +51,7 @@ The pipeline supports two storage backends:
 ### Production Mode (Default)
 
 Uses PostgreSQL for raw data and ClickHouse for analytics. This is the required mode for MVP.
+Migrations are applied automatically on service startup.
 
 ```bash
 # Set DSN environment variables or use flags
