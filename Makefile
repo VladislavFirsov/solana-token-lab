@@ -18,7 +18,7 @@ help:
 	@echo "    make clean          - Remove containers and volumes"
 	@echo ""
 	@echo "  Database:"
-	@echo "    make migrate        - Apply SQL migrations"
+	@echo "    make migrate        - Apply all database migrations"
 	@echo "    make psql           - Connect to PostgreSQL"
 	@echo "    make clickhouse-cli - Connect to ClickHouse"
 	@echo ""
@@ -90,28 +90,27 @@ clean:
 	docker-compose --profile ingest --profile pipeline --profile report --profile dev down -v
 	@echo "Done."
 
-# =============================================================================
-# Database
-# =============================================================================
-
-migrate:
-	@echo "Applying PostgreSQL migrations..."
-	@for f in sql/postgres/*.sql; do \
-		echo "Applying $$f..."; \
-		PGPASSWORD=$${POSTGRES_PASSWORD:-solana_secret} psql -h localhost -U $${POSTGRES_USER:-solana} -d $${POSTGRES_DB:-solana_lab} -f $$f; \
-	done
-	@echo "Applying ClickHouse migrations..."
-	@for f in sql/clickhouse/*.sql; do \
-		echo "Applying $$f..."; \
-		clickhouse-client --host localhost --query "$$(cat $$f)"; \
-	done
-	@echo "Migrations complete."
-
 psql:
 	PGPASSWORD=$${POSTGRES_PASSWORD:-solana_secret} psql -h localhost -U $${POSTGRES_USER:-solana} -d $${POSTGRES_DB:-solana_lab}
 
 clickhouse-cli:
 	clickhouse-client --host localhost
+
+migrate:
+	@echo "Checking database availability..."
+	@docker ps --format '{{.Names}}' | grep -q solana-lab-postgres || (echo "ERROR: PostgreSQL container 'solana-lab-postgres' is not running. Run 'make up' first." && exit 1)
+	@docker ps --format '{{.Names}}' | grep -q solana-lab-clickhouse || (echo "ERROR: ClickHouse container 'solana-lab-clickhouse' is not running. Run 'make up' first." && exit 1)
+	@echo "Applying PostgreSQL migrations..."
+	@for f in sql/postgres/*.sql; do \
+		echo "  Applying $$f..."; \
+		PGPASSWORD=$${POSTGRES_PASSWORD:-solana_secret} psql -h localhost -U $${POSTGRES_USER:-solana} -d $${POSTGRES_DB:-solana_lab} -f "$$f" -q || exit 1; \
+	done
+	@echo "Applying ClickHouse migrations..."
+	@for f in sql/clickhouse/*.sql; do \
+		echo "  Applying $$f..."; \
+		cat "$$f" | docker exec -i solana-lab-clickhouse clickhouse-client --multiquery || exit 1; \
+	done
+	@echo "Migrations complete!"
 
 # =============================================================================
 # Run Services Locally
@@ -124,8 +123,7 @@ ingest: build
 		--rpc-endpoint "https://mainnet.helius-rpc.com/?api-key=$${HELIUS_API_KEY}" \
 		--ws-endpoint "wss://mainnet.helius-rpc.com/?api-key=$${HELIUS_API_KEY}" \
 		--dex raydium,pumpfun \
-		--postgres-dsn "postgres://$${POSTGRES_USER:-solana}:$${POSTGRES_PASSWORD:-solana_secret}@localhost:5432/$${POSTGRES_DB:-solana_lab}?sslmode=disable" \
-		--clickhouse-dsn "clickhouse://localhost:9000/$${CLICKHOUSE_DB:-solana_lab}"
+		--postgres-dsn "postgres://$${POSTGRES_USER:-solana}:$${POSTGRES_PASSWORD:-solana_secret}@localhost:5432/$${POSTGRES_DB:-solana_lab}?sslmode=disable"
 
 pipeline: build
 	@echo "Running pipeline..."

@@ -22,8 +22,6 @@ cp .env.example .env
 # Start databases
 make up
 
-# Apply migrations (first time only)
-make migrate
 ```
 
 ### 3. Run Ingestion (collect data)
@@ -112,7 +110,6 @@ make ps             # Show container status
 make clean          # Remove containers and volumes
 
 # Database
-make migrate        # Apply SQL migrations
 make psql           # Connect to PostgreSQL
 make clickhouse-cli # Connect to ClickHouse
 

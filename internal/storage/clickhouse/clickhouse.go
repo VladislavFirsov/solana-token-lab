@@ -36,6 +36,28 @@ func NewConn(ctx context.Context, dsn string) (*Conn, error) {
 	return &Conn{Conn: conn}, nil
 }
 
+// NewConnWithDatabase creates a ClickHouse connection overriding the database name.
+// Pass an empty database to connect without selecting a database.
+func NewConnWithDatabase(ctx context.Context, dsn, database string) (*Conn, error) {
+	opts, err := parseDSN(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("parse clickhouse dsn: %w", err)
+	}
+	opts.Auth.Database = database
+
+	conn, err := clickhouse.Open(opts)
+	if err != nil {
+		return nil, fmt.Errorf("open clickhouse connection: %w", err)
+	}
+
+	if err := conn.Ping(ctx); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("ping clickhouse: %w", err)
+	}
+
+	return &Conn{Conn: conn}, nil
+}
+
 // Close closes the connection.
 func (c *Conn) Close() error {
 	return c.Conn.Close()

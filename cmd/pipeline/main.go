@@ -23,6 +23,7 @@ import (
 	"solana-token-lab/internal/replay"
 	"solana-token-lab/internal/storage"
 	"solana-token-lab/internal/storage/clickhouse"
+	"solana-token-lab/internal/storage/migrations"
 	"solana-token-lab/internal/storage/memory"
 	"solana-token-lab/internal/storage/postgres"
 )
@@ -225,11 +226,16 @@ func createDBStores(ctx context.Context, postgresDSN, clickhouseDSN string) (*al
 		return nil, nil, fmt.Errorf("connect to postgres: %w", err)
 	}
 
-	// Connect to ClickHouse
-	chConn, err := clickhouse.NewConn(ctx, clickhouseDSN)
+	if err := migrations.RunPostgresMigrations(ctx, pgPool); err != nil {
+		pgPool.Close()
+		return nil, nil, fmt.Errorf("postgres migrations: %w", err)
+	}
+
+	// Connect to ClickHouse (after migrations)
+	chConn, err := migrations.RunClickhouseMigrations(ctx, clickhouseDSN)
 	if err != nil {
 		pgPool.Close()
-		return nil, nil, fmt.Errorf("connect to clickhouse: %w", err)
+		return nil, nil, fmt.Errorf("clickhouse migrations: %w", err)
 	}
 
 	// Cleanup function

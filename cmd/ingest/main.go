@@ -18,6 +18,7 @@ import (
 	"solana-token-lab/internal/solana"
 	"solana-token-lab/internal/storage"
 	"solana-token-lab/internal/storage/memory"
+	"solana-token-lab/internal/storage/migrations"
 	pgstore "solana-token-lab/internal/storage/postgres"
 )
 
@@ -202,6 +203,10 @@ func runLive(ctx context.Context, logger *log.Logger, rpcEndpoint, wsEndpoint, p
 		}
 		defer pool.Close()
 
+		if err := migrations.RunPostgresMigrations(ctx, pool); err != nil {
+			return fmt.Errorf("postgres migrations: %w", err)
+		}
+
 		swapEventStore = pgstore.NewSwapEventStore(pool)
 		liquidityStore = pgstore.NewLiquidityEventStore(pool)
 		candidateStore = pgstore.NewCandidateStore(pool)
@@ -261,6 +266,10 @@ func runBackfill(ctx context.Context, logger *log.Logger, rpcEndpoint, postgresD
 			return fmt.Errorf("connect to postgres: %w", err)
 		}
 		defer pool.Close()
+
+		if err := migrations.RunPostgresMigrations(ctx, pool); err != nil {
+			return fmt.Errorf("postgres migrations: %w", err)
+		}
 
 		swapEventStore = pgstore.NewSwapEventStore(pool)
 		liquidityStore = pgstore.NewLiquidityEventStore(pool)
@@ -338,6 +347,10 @@ func runReplay(ctx context.Context, logger *log.Logger, postgresDSN, fromTimeStr
 			return fmt.Errorf("connect to postgres: %w", err)
 		}
 		defer pool.Close()
+
+		if err := migrations.RunPostgresMigrations(ctx, pool); err != nil {
+			return fmt.Errorf("postgres migrations: %w", err)
+		}
 
 		swapEventStore = pgstore.NewSwapEventStore(pool)
 		candidateStore = pgstore.NewCandidateStore(pool)

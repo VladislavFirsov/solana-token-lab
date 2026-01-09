@@ -4,12 +4,46 @@ import (
 	"context"
 	"log"
 	"strings"
+	"time"
 
 	"solana-token-lab/internal/discovery"
 	"solana-token-lab/internal/domain"
 	"solana-token-lab/internal/solana"
 	"solana-token-lab/internal/storage"
 )
+
+const (
+	maxRetries     = 3
+	baseRetryDelay = 500 * time.Millisecond
+)
+
+// retryGetTransaction fetches a transaction with exponential backoff retry.
+func retryGetTransaction(ctx context.Context, rpc *solana.HTTPClient, signature string) (*solana.Transaction, error) {
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		tx, err := rpc.GetTransaction(ctx, signature)
+		if err == nil {
+			return tx, nil
+		}
+		lastErr = err
+
+		// Don't retry on context cancellation
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		// Exponential backoff: 500ms, 1s, 2s
+		delay := baseRetryDelay * time.Duration(1<<attempt)
+		log.Printf("[ws] Retry %d/%d for GetTransaction %s after %v: %v", attempt+1, maxRetries, signature, delay, err)
+
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return nil, lastErr
+}
 
 // WSSwapEventSource provides real-time swap events via WebSocket subscription.
 type WSSwapEventSource struct {
@@ -92,13 +126,13 @@ func (s *WSSwapEventSource) processSwapNotification(ctx context.Context, eventsC
 
 	log.Printf("[ws-swap] Processing tx: %s (slot=%d, logs=%d)", notif.Signature, notif.Slot, len(notif.Logs))
 
-	// Fetch full transaction for account keys and blockTime
-	tx, err := s.rpc.GetTransaction(ctx, notif.Signature)
+	// Fetch full transaction for account keys and blockTime with retry
+	tx, err := retryGetTransaction(ctx, s.rpc, notif.Signature)
 	if err != nil || tx == nil {
 		// Fallback: use deterministic timestamp and V2 parser
 		isRaydium := containsRaydiumProgram(notif.Logs)
 		if isRaydium {
-			log.Printf("WARN: RPC fetch failed for Raydium tx %s, swap will be dropped: %v", notif.Signature, err)
+			log.Printf("WARN: RPC fetch failed for Raydium tx %s after %d retries, swap will be dropped: %v", notif.Signature, maxRetries, err)
 		}
 		timestamp, _ := resolveBlockTimestamp(ctx, s.rpc, notif.Slot, 0)
 		swapEvents := s.parser.ParseSwapEventsV2(
@@ -276,9 +310,10 @@ func (s *WSLiquidityEventSource) processLiquidityNotification(ctx context.Contex
 		return
 	}
 
-	// Fetch full transaction for account keys and blockTime
-	tx, err := s.rpc.GetTransaction(ctx, notif.Signature)
+	// Fetch full transaction for account keys and blockTime with retry
+	tx, err := retryGetTransaction(ctx, s.rpc, notif.Signature)
 	if err != nil || tx == nil {
+		log.Printf("WARN: RPC fetch failed for liquidity tx %s after %d retries: %v", notif.Signature, maxRetries, err)
 		timestamp, _ := resolveBlockTimestamp(ctx, s.rpc, notif.Slot, 0)
 		liqEvents := s.parser.ParseLiquidityEventsV2(
 			notif.Logs,
