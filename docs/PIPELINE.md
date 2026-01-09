@@ -44,14 +44,51 @@ The pipeline guarantees identical outputs for identical inputs:
 
 3. **No Random State**: No random number generators or system-dependent values.
 
+## Storage Modes
+
+The pipeline supports two storage backends:
+
+### Production Mode (Default)
+
+Uses PostgreSQL for raw data and ClickHouse for analytics. This is the required mode for MVP.
+
+```bash
+# Set DSN environment variables or use flags
+export POSTGRES_DSN="postgres://user:pass@localhost:5432/solana_lab?sslmode=disable"
+export CLICKHOUSE_DSN="clickhouse://localhost:9000/solana_lab"
+
+# Run pipeline
+go run cmd/pipeline/main.go --output-dir ./output
+
+# Or with explicit flags
+go run cmd/pipeline/main.go \
+  --postgres-dsn "postgres://user:pass@localhost:5432/solana_lab?sslmode=disable" \
+  --clickhouse-dsn "clickhouse://localhost:9000/solana_lab" \
+  --output-dir ./output
+```
+
+### Demo Mode (Fixtures)
+
+Uses in-memory stores with fixture data. **For development and demos only.**
+
+```bash
+go run cmd/pipeline/main.go --use-fixtures --output-dir ./output
+```
+
+> **Warning:** Fixtures mode uses hardcoded demo data with only 3 candidates.
+> Production runs MUST use database-backed storage.
+
 ## Usage
 
 ```bash
-# Generate reports to docs/ directory
-go run cmd/report/main.go --output-dir=docs
+# Production: Run with databases (default)
+go run cmd/pipeline/main.go \
+  --postgres-dsn "$POSTGRES_DSN" \
+  --clickhouse-dsn "$CLICKHOUSE_DSN" \
+  --output-dir ./output
 
-# Generate to custom directory
-go run cmd/report/main.go --output-dir=/tmp/output
+# Demo: Run with fixtures (development only)
+go run cmd/pipeline/main.go --use-fixtures --output-dir ./output
 ```
 
 ## Output Files
@@ -93,22 +130,28 @@ Run tests:
 go test ./internal/pipeline/... -v
 ```
 
-## Fixture Data
+## Fixture Data (Demo Only)
 
-For development and testing, the pipeline uses in-memory stores populated
+> **Warning:** Fixtures are for development and demos only. Do not use for production analysis.
+
+When using `--use-fixtures`, the pipeline uses in-memory stores populated
 with fixture data via `LoadFixtures()`. This includes:
 
 - 3 token candidates (2 NEW_TOKEN, 1 ACTIVE_TOKEN)
 - 5 trade records across realistic/degraded scenarios
 - 5 strategy aggregates with realistic metrics
 
-To use real data, replace the memory stores with database-backed implementations.
+For production analysis, use database-backed storage with `--postgres-dsn` and `--clickhouse-dsn`.
 
 ## Configuration
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| `--postgres-dsn` | `$POSTGRES_DSN` | PostgreSQL connection string (required unless `--use-fixtures`) |
+| `--clickhouse-dsn` | `$CLICKHOUSE_DSN` | ClickHouse connection string (required unless `--use-fixtures`) |
+| `--use-fixtures` | `false` | Use in-memory fixtures instead of databases (demo only) |
 | `--output-dir` | `docs` | Directory for generated files |
+| `--verbose` | `false` | Verbose output |
 
 ## Dependencies
 
