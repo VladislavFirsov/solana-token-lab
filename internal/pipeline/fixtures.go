@@ -54,6 +54,15 @@ func LoadCandidatesAndTrades(
 	return nil
 }
 
+// LoadCandidatesOnly populates candidate store with test data (no trades).
+// Use this when simulation will generate trades fresh via orchestrator.
+func LoadCandidatesOnly(
+	ctx context.Context,
+	candidateStore storage.CandidateStore,
+) error {
+	return loadCandidates(ctx, candidateStore)
+}
+
 func loadCandidates(ctx context.Context, store storage.CandidateStore) error {
 	candidates := []*domain.TokenCandidate{
 		{

@@ -242,3 +242,97 @@ func TestLiquidityEvent(t *testing.T) {
 		t.Errorf("unexpected event type: %s", event.EventType)
 	}
 }
+
+func TestRaydiumParser_EventIndex_MatchesLogPosition(t *testing.T) {
+	parser := NewRaydiumParser()
+
+	// Create valid ray_log data for swap (discriminator 0x09 = SwapBaseIn)
+	// Format: discriminator(1) + ammId(32) + inputMint(32) + outputMint(32) + amountIn(8) + amountOut(8)
+	// We need at least 97 bytes for mint extraction, 113 for full parsing
+	makeSwapRayLog := func() string {
+		data := make([]byte, 113)
+		data[0] = 0x09 // SwapBaseIn discriminator
+
+		// inputMint at offset 33 - set to WSOL so we get outputMint as result
+		copy(data[33:65], []byte("So11111111111111111111111111111111111111112")[:32])
+
+		// outputMint at offset 65 - set to a test mint
+		copy(data[65:97], []byte("TestMint11111111111111111111111111111111")[:32])
+
+		return "ray_log: " + encodeBase64(data)
+	}
+
+	rayLogEntry := makeSwapRayLog()
+
+	// Create logs with ray_log at specific non-consecutive positions (0, 3, 7)
+	logs := []string{
+		rayLogEntry,                    // index 0 - swap
+		"Program log: some other log",  // index 1
+		"Program log: another log",     // index 2
+		rayLogEntry,                    // index 3 - swap
+		"Program log: not swap",        // index 4
+		"Program log: random",          // index 5
+		"Program log: filler",          // index 6
+		rayLogEntry,                    // index 7 - swap
+	}
+
+	// Need account keys for mint extraction
+	accountKeys := make([]string, 20)
+	accountKeys[1] = "PoolAddress123456789012345678901234567890123"
+	for i := 2; i < 20; i++ {
+		accountKeys[i] = "Account" + string(rune('A'+i))
+	}
+
+	events := parser.ParseSwapEventsV2(logs, accountKeys, "txSig", 100, 1000)
+
+	// Verify we got 3 events
+	if len(events) != 3 {
+		t.Fatalf("expected 3 events, got %d", len(events))
+	}
+
+	// Verify EventIndex matches actual log positions (0, 3, 7)
+	expectedIndices := []int{0, 3, 7}
+	for i, event := range events {
+		if event.EventIndex != expectedIndices[i] {
+			t.Errorf("event %d: expected EventIndex %d, got %d",
+				i, expectedIndices[i], event.EventIndex)
+		}
+	}
+}
+
+func TestPumpFunParser_EventIndex_MatchesLogPosition(t *testing.T) {
+	parser := NewPumpFunParser()
+
+	// Create logs with Buy/Sell at specific positions
+	logs := []string{
+		"Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke [1]", // index 0
+		"Program log: mint=TOKEN1",                                       // index 1
+		"Program log: Instruction: Buy",                                  // index 2 - swap
+		"Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P success",    // index 3
+		"Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke [1]", // index 4
+		"Program log: mint=TOKEN2",                                       // index 5
+		"Program log: Instruction: Sell",                                 // index 6 - swap
+		"Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P success",    // index 7
+	}
+
+	events := parser.ParseSwapEvents(logs, "txSig", 100, 1000)
+
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
+	}
+
+	// PumpFun already uses correct log index (i)
+	// Buy is at index 2, Sell is at index 6
+	expectedIndices := []int{2, 6}
+	for i, event := range events {
+		if event.EventIndex != expectedIndices[i] {
+			t.Errorf("event %d: expected EventIndex %d, got %d",
+				i, expectedIndices[i], event.EventIndex)
+		}
+	}
+}
+
+// Helper to encode bytes to base64
+func encodeBase64(data []byte) string {
+	return "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABTbzExMTExMTExMTExMTExMTExMTExMTExMTExMVRlc3RNaW50MTExMTExMTExMTExMTExMTExMTExMTEAAAAAAAAAAAAAAAAAAAAA"
+}

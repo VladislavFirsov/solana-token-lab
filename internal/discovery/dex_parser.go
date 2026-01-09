@@ -213,9 +213,9 @@ func (p *RaydiumParser) ParseSwapEvents(logs []string, txSig string, slot int64,
 
 // ParseSwapEventsV2 parses Raydium swap events using logs and account keys.
 // This enables proper extraction of mint and pool addresses.
+// EventIndex is set to the actual log index (i) per DISCOVERY_SPEC.md.
 func (p *RaydiumParser) ParseSwapEventsV2(logs []string, accountKeys []string, txSig string, slot int64, timestamp int64) []*SwapEvent {
 	var events []*SwapEvent
-	var eventIdx int
 
 	// Find ray_log entries indicating swaps
 	for i, log := range logs {
@@ -253,7 +253,7 @@ func (p *RaydiumParser) ParseSwapEventsV2(logs []string, accountKeys []string, t
 		event := &SwapEvent{
 			Mint:        mint,
 			TxSignature: txSig,
-			EventIndex:  eventIdx,
+			EventIndex:  i, // Use actual log index per DISCOVERY_SPEC.md
 			Slot:        slot,
 			Timestamp:   timestamp,
 			AmountOut:   amountOut,
@@ -263,9 +263,6 @@ func (p *RaydiumParser) ParseSwapEventsV2(logs []string, accountKeys []string, t
 		}
 
 		events = append(events, event)
-		eventIdx++
-
-		_ = i // used for potential debugging
 	}
 
 	return events
@@ -331,9 +328,9 @@ func (p *RaydiumParser) ParseLiquidityEvents(logs []string, txSig string, slot i
 }
 
 // ParseLiquidityEventsV2 parses Raydium liquidity events with account keys.
+// EventIndex is set to the actual log index (i) per DISCOVERY_SPEC.md.
 func (p *RaydiumParser) ParseLiquidityEventsV2(logs []string, accountKeys []string, txSig string, slot int64, timestamp int64) []*LiquidityEvent {
 	var events []*LiquidityEvent
-	var eventIdx int
 
 	for i, log := range logs {
 		matches := p.rayLogPattern.FindStringSubmatch(log)
@@ -381,14 +378,12 @@ func (p *RaydiumParser) ParseLiquidityEventsV2(logs []string, accountKeys []stri
 			AmountToken: amountToken,
 			AmountQuote: amountQuote,
 			TxSignature: txSig,
-			EventIndex:  eventIdx,
+			EventIndex:  i, // Use actual log index per DISCOVERY_SPEC.md
 			Slot:        slot,
 			Timestamp:   timestamp,
 		}
 
 		events = append(events, event)
-		eventIdx++
-		_ = i
 	}
 
 	return events

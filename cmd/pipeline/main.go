@@ -170,15 +170,10 @@ func createAllMemoryStores() *allStores {
 
 // loadFixtureData loads fixture data into stores.
 func loadFixtureData(ctx context.Context, stores *allStores) error {
-	// Load candidates (required)
-	if err := pipeline.LoadCandidatesAndTrades(ctx, stores.candidateStore, stores.tradeRecordStore); err != nil {
+	// Load candidates only (trades will be generated fresh by orchestrator simulation)
+	if err := pipeline.LoadCandidatesOnly(ctx, stores.candidateStore); err != nil {
 		return fmt.Errorf("load candidates: %w", err)
 	}
-
-	// Clear trades - we'll regenerate via orchestrator
-	// (LoadCandidatesAndTrades also loads trades, but we want to simulate fresh)
-	// Note: memory store doesn't support clear, so trades will be duplicated
-	// In real scenario, we'd use clean stores or skip loading trades
 
 	// Load swap and liquidity events (required for normalization)
 	if err := pipeline.LoadSwapsAndLiquidity(ctx, stores.swapStore, stores.liquidityEventStore); err != nil {
