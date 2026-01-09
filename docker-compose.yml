@@ -8,8 +8,8 @@ services:
     image: postgres:15-alpine
     container_name: solana-lab-postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-solana}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-solana_secret}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-solana_lab}
     ports:
       - "5432:5432"
@@ -17,7 +17,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./sql/postgres:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-solana} -d ${POSTGRES_DB:-solana_lab}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-solana_lab}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -31,7 +31,7 @@ services:
     container_name: solana-lab-clickhouse
     environment:
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
       CLICKHOUSE_DB: ${CLICKHOUSE_DB:-solana_lab}
     ports:
       - "8123:8123"   # HTTP interface
@@ -59,8 +59,8 @@ services:
       - --rpc-endpoint=${SOLANA_RPC_ENDPOINT}
       - --ws-endpoint=${SOLANA_WS_ENDPOINT}
       - --dex=raydium,pumpfun
-      - --postgres-dsn=postgres://${POSTGRES_USER:-solana}:${POSTGRES_PASSWORD:-solana_secret}@postgres:5432/${POSTGRES_DB:-solana_lab}?sslmode=disable
-      - --clickhouse-dsn=clickhouse://${CLICKHOUSE_USER:-default}:${CLICKHOUSE_PASSWORD:-}@clickhouse:9000/${CLICKHOUSE_DB:-solana_lab}
+      - --postgres-dsn=${POSTGRES_DSN}
+      - --clickhouse-dsn=${CLICKHOUSE_DSN}
     depends_on:
       postgres:
         condition: service_healthy
@@ -82,8 +82,8 @@ services:
     container_name: solana-lab-pipeline
     entrypoint: ["/app/pipeline"]
     command:
-      - --postgres-dsn=postgres://${POSTGRES_USER:-solana}:${POSTGRES_PASSWORD:-solana_secret}@postgres:5432/${POSTGRES_DB:-solana_lab}?sslmode=disable
-      - --clickhouse-dsn=clickhouse://${CLICKHOUSE_USER:-default}:${CLICKHOUSE_PASSWORD:-}@clickhouse:9000/${CLICKHOUSE_DB:-solana_lab}
+      - --postgres-dsn=${POSTGRES_DSN}
+      - --clickhouse-dsn=${CLICKHOUSE_DSN}
       - --output-dir=/app/output
     volumes:
       - ./output:/app/output
@@ -105,8 +105,8 @@ services:
     container_name: solana-lab-report
     entrypoint: ["/app/report"]
     command:
-      - --postgres-dsn=postgres://${POSTGRES_USER:-solana}:${POSTGRES_PASSWORD:-solana_secret}@postgres:5432/${POSTGRES_DB:-solana_lab}?sslmode=disable
-      - --clickhouse-dsn=clickhouse://${CLICKHOUSE_USER:-default}:${CLICKHOUSE_PASSWORD:-}@clickhouse:9000/${CLICKHOUSE_DB:-solana_lab}
+      - --postgres-dsn=${POSTGRES_DSN}
+      - --clickhouse-dsn=${CLICKHOUSE_DSN}
       - --output-dir=/app/output
     volumes:
       - ./output:/app/output
