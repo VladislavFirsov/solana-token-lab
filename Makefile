@@ -105,10 +105,12 @@ migrate:
 		echo "  Applying $$f..."; \
 		PGPASSWORD=$${POSTGRES_PASSWORD:-solana_secret} psql -h localhost -U $${POSTGRES_USER:-solana} -d $${POSTGRES_DB:-solana_lab} -f "$$f" -q || exit 1; \
 	done
+	@echo "Creating ClickHouse database..."
+	@cat sql/clickhouse/000_create_db.sql | docker exec -i solana-lab-clickhouse clickhouse-client --multiquery || exit 1
 	@echo "Applying ClickHouse migrations..."
-	@for f in sql/clickhouse/*.sql; do \
+	@for f in sql/clickhouse/0[0-9][1-9]*.sql; do \
 		echo "  Applying $$f..."; \
-		cat "$$f" | docker exec -i solana-lab-clickhouse clickhouse-client --multiquery || exit 1; \
+		cat "$$f" | docker exec -i solana-lab-clickhouse clickhouse-client --database=$${CLICKHOUSE_DB:-solana_lab} --multiquery || exit 1; \
 	done
 	@echo "Migrations complete!"
 

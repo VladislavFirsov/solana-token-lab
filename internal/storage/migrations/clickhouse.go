@@ -56,6 +56,13 @@ func RunClickhouseMigrations(ctx context.Context, dsn string) (*chstore.Conn, er
 			conn.Close()
 			return nil, fmt.Errorf("read migration %s: %w", file, err)
 		}
+
+		// Validate SQL doesn't contain semicolons in strings (would break splitter)
+		if err := validateNoSemicolonInStrings(string(data)); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("validate migration %s: %w", file, err)
+		}
+
 		// Execute each statement individually (split by semicolon)
 		// ClickHouse driver doesn't support multiquery in Exec
 		stmts := splitStatements(string(data))
@@ -70,8 +77,19 @@ func RunClickhouseMigrations(ctx context.Context, dsn string) (*chstore.Conn, er
 	return conn, nil
 }
 
-// splitStatements splits SQL content into individual statements.
-// Handles comments and preserves statement integrity.
+// splitStatements splits SQL content into individual statements by semicolon.
+//
+// IMPORTANT CONSTRAINT: This splitter is intentionally simple and does NOT handle:
+//   - Semicolons inside string literals (e.g., 'foo;bar')
+//   - Semicolons inside inline comments (e.g., /* foo; bar */)
+//   - Dollar-quoted strings
+//
+// All ClickHouse migrations MUST follow these rules:
+//  1. No semicolons inside string literals
+//  2. Use -- style comments only (not /* */ with semicolons)
+//  3. Each statement ends with a semicolon on its own line or at end of statement
+//
+// This constraint is validated at migration time - see validateNoSemicolonInStrings.
 func splitStatements(input string) []string {
 	var filtered []string
 	for _, line := range strings.Split(input, "\n") {
@@ -91,6 +109,27 @@ func splitStatements(input string) []string {
 		}
 	}
 	return stmts
+}
+
+// validateNoSemicolonInStrings checks that SQL doesn't contain semicolons inside
+// single-quoted strings, which would break our simple statement splitter.
+// Returns an error if a dangerous pattern is detected.
+func validateNoSemicolonInStrings(sql string) error {
+	inString := false
+	for i := 0; i < len(sql); i++ {
+		ch := sql[i]
+		if ch == '\'' {
+			// Handle escaped quotes ''
+			if i+1 < len(sql) && sql[i+1] == '\'' {
+				i++ // skip next quote
+				continue
+			}
+			inString = !inString
+		} else if ch == ';' && inString {
+			return fmt.Errorf("semicolon found inside string literal - this breaks the migration splitter")
+		}
+	}
+	return nil
 }
 
 func databaseFromDSN(dsn string) (string, error) {

@@ -2,8 +2,6 @@
 -- Description: Time series tables for price, liquidity, and volume aggregates
 -- Engine: MergeTree for efficient time-series queries
 
-USE solana_lab;
-
 -- Price time series (aggregated from swaps)
 CREATE TABLE IF NOT EXISTS price_timeseries (
     candidate_id        String,

@@ -2,8 +2,6 @@
 -- Description: Derived features computed from time series data
 -- Engine: MergeTree for efficient analytical queries
 
-USE solana_lab;
-
 CREATE TABLE IF NOT EXISTS derived_features (
     candidate_id                String,
     timestamp_ms                UInt64,             -- Unix timestamp (ms)

@@ -2,8 +2,6 @@
 -- Stores pre-computed aggregate metrics per strategy/scenario/entry_event_type.
 -- Append-only: composite key (strategy_id, scenario_id, entry_event_type) must be unique.
 
-USE solana_lab;
-
 CREATE TABLE IF NOT EXISTS strategy_aggregates (
     strategy_id String,
     scenario_id String,

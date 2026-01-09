@@ -2,8 +2,6 @@
 -- Description: Deterministic views for computing derived features from time series
 -- Requires: 001_timeseries.sql, 002_derived_features.sql
 
-USE solana_lab;
-
 -- ============================================================================
 -- Price Derivatives View
 -- ============================================================================
