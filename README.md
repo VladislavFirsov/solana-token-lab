@@ -6,7 +6,7 @@ Deterministic research platform for analyzing high-risk Solana tokens and decidi
 
 ### 1. Prerequisites
 - Docker & Docker Compose
-- Go 1.22+
+- Go 1.24+
 - Helius API key (get from https://helius.dev)
 
 ### 2. Setup

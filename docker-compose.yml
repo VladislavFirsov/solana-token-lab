@@ -60,7 +60,6 @@ services:
       - --ws-endpoint=${SOLANA_WS_ENDPOINT}
       - --dex=raydium,pumpfun
       - --postgres-dsn=${POSTGRES_DSN}
-      - --clickhouse-dsn=${CLICKHOUSE_DSN}
     depends_on:
       postgres:
         condition: service_healthy
