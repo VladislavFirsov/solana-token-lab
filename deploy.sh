@@ -2,8 +2,7 @@
 set -e
 
 APP_DIR="/home/worker/solana-token-lab"
-APP_NAME=
-DOCKER_COMPOSE_FILE=
+DOCKER_COMPOSE_FILE="docker-compose.yml"
 
 echo "===> Deploy started: $(date)"
 cd "$APP_DIR"
