@@ -1,6 +1,3 @@
-# Local workflow artifacts
-workflow/
-
 # Environment files (secrets)
 .env
 .env.local
@@ -33,6 +30,3 @@ workflow/
 # IDE
 .idea/
 .vscode/
-
-# CI/CD (not used)
-.github/
