@@ -17,6 +17,8 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
+          script_stop: true
+          debug: true
           script: |
             set -e
             bash /home/worker/solana-token-lab/deploy.sh
