@@ -12,7 +12,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-solana_lab}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./sql/postgres:/docker-entrypoint-initdb.d:ro
@@ -34,8 +34,8 @@ services:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
       CLICKHOUSE_DB: ${CLICKHOUSE_DB:-solana_lab}
     ports:
-      - "8123:8123"   # HTTP interface
-      - "9000:9000"   # Native TCP
+      - "127.0.0.1:8123:8123"   # HTTP interface
+      - "127.0.0.1:9000:9000"   # Native TCP
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./sql/clickhouse:/docker-entrypoint-initdb.d:ro
